@@ -38,6 +38,12 @@
             "backgroundColor": "#000000"
           }
         }
+      ],
+      [
+        "expo-location",
+        {
+          "locationAlwaysPermission": "Allow RJR Fresh to use your location."
+        }
       ]
     ],
     "experiments": {
