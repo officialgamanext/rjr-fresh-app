@@ -51,6 +51,7 @@ export default function MainScreen() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [loadingShops, setLoadingShops] = useState(false);
   const [activeSlideIndex, setActiveSlideIndex] = useState(0);
+  const [isInitialCheckDone, setIsInitialCheckDone] = useState(false);
 
   // Sale Order States
   const [isSaleOrderModalOpen, setIsSaleOrderModalOpen] = useState(false);
@@ -167,6 +168,50 @@ export default function MainScreen() {
       setLoadingShops(false);
     }
   };
+
+  // Check for existing check-in today on mount
+  useEffect(() => {
+    const checkStatus = async () => {
+      if (!user?.uid || isInitialCheckDone) return;
+      
+      try {
+        console.log('Home: Checking today\'s check-in status...');
+        const today = new Date().toISOString().split('T')[0];
+        const q = query(
+          collection(db, 'checkins'),
+          where('userId', '==', user.uid),
+          where('date', '==', today)
+        );
+        const snap = await getDocs(q);
+        
+        if (!snap.empty) {
+          // Sort locally to avoid index requirement
+          const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+          docs.sort((a: any, b: any) => {
+            const timeA = a.timestamp?.seconds || 0;
+            const timeB = b.timestamp?.seconds || 0;
+            return timeB - timeA;
+          });
+          
+          const lastCheckIn = docs[0];
+          console.log('Home: Found active check-in for today:', lastCheckIn.shopName);
+          setCurrentCheckIn(lastCheckIn);
+          setIsInitialCheckDone(true);
+        } else {
+          console.log('Home: No check-in found for today. Triggering location flow...');
+          setIsInitialCheckDone(true);
+          handleCheckInPress();
+        }
+      } catch (err) {
+        console.error('Home: Error checking check-in status:', err);
+        setIsInitialCheckDone(true);
+      }
+    };
+
+    if (user) {
+      checkStatus();
+    }
+  }, [user, isInitialCheckDone]);
 
   const performCheckIn = async (shop: any) => {
     setCheckingIn(true);
