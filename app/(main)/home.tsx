@@ -12,6 +12,7 @@ import {
   Modal,
   FlatList,
   TextInput,
+  Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,7 +20,7 @@ import { useAuth } from '../../context/AuthContext';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { db } from '../../config/firebase';
-import { collection, getDocs, addDoc, serverTimestamp, query, where, orderBy, setDoc, doc } from 'firebase/firestore';
+import { collection, getDocs, addDoc, serverTimestamp, query, where, orderBy, setDoc, doc, getDoc, updateDoc, increment } from 'firebase/firestore';
 import * as Location from 'expo-location';
 
 const { width } = Dimensions.get('window');
@@ -51,6 +52,7 @@ export default function MainScreen() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [loadingShops, setLoadingShops] = useState(false);
   const [activeSlideIndex, setActiveSlideIndex] = useState(0);
+  const [userLocation, setUserLocation] = useState<any>(null);
   const [isInitialCheckDone, setIsInitialCheckDone] = useState(false);
 
   // Sale Order States
@@ -60,6 +62,10 @@ export default function MainScreen() {
   const [loadingPrices, setLoadingPrices] = useState(false);
   const [savingOrder, setSavingOrder] = useState(false);
   const [discount, setDiscount] = useState('0');
+  const [receivedAmount, setReceivedAmount] = useState('0');
+  const [paymentMethod, setPaymentMethod] = useState('Cash');
+  const [useCredit, setUseCredit] = useState(false);
+  const [shopDetails, setShopDetails] = useState<any>(null);
   const [isSummaryFlyoutOpen, setIsSummaryFlyoutOpen] = useState(false);
 
   // Fetch employee details on mount
@@ -126,6 +132,7 @@ export default function MainScreen() {
         accuracy: Location.Accuracy.High,
       });
       const { latitude, longitude } = location.coords;
+      setUserLocation({ latitude, longitude });
       console.log(`Current User Location: Lat ${latitude}, Lon ${longitude}`);
 
       setLoadingShops(true);
@@ -233,14 +240,22 @@ export default function MainScreen() {
       const checkInData = {
         shopId: shop.id,
         shopName: shop.name,
+        shopAddress: shop.address || '',
         userId: user?.uid,
         username: user?.email?.split('@')[0] || 'User',
+        employeeId: finalEmployee?.id || user?.uid,
         employeeName: finalEmployee?.name || 'N/A',
         employeeMobile: finalEmployee?.mobile || 'N/A',
         priceListId: shop.priceListId || '',
+        userLatitude: userLocation?.latitude || 0,
+        userLongitude: userLocation?.longitude || 0,
+        shopLatitude: shop.latitude || 0,
+        shopLongitude: shop.longitude || 0,
+        distance: shop.distance || 0,
         date: now.toISOString().split('T')[0],
         time: now.toLocaleTimeString(),
         timestamp: serverTimestamp(),
+        status: 'Active',
       };
 
       await addDoc(collection(db, 'checkins'), checkInData);
@@ -290,6 +305,19 @@ export default function MainScreen() {
     setLoadingPrices(true);
     setIsSaleOrderModalOpen(true);
     try {
+      // Fetch Shop Details directly by ID for credit/balance info
+      console.log('Home: Fetching fresh shop details for ID:', currentCheckIn.shopId);
+      const shopRef = doc(db, 'shops', currentCheckIn.shopId);
+      const shopSnap = await getDoc(shopRef);
+      
+      if (shopSnap.exists()) {
+        const data = shopSnap.data();
+        console.log('Home: Shop data fetched:', data);
+        setShopDetails({ id: shopSnap.id, ...data });
+      } else {
+        console.warn('Home: Shop document not found for ID:', currentCheckIn.shopId);
+      }
+
       const q = query(
         collection(db, `priceLists/${currentCheckIn.priceListId}/items`),
         orderBy('itemName', 'asc')
@@ -300,6 +328,9 @@ export default function MainScreen() {
       setPriceListItems(items);
       setCart({}); // Reset cart
       setDiscount('0');
+      setReceivedAmount('0');
+      setPaymentMethod('Cash');
+      setUseCredit(false);
     } catch (error) {
       console.error('Error fetching price list:', error);
       Alert.alert('Error', 'Failed to load items.');
@@ -355,6 +386,13 @@ export default function MainScreen() {
       const SS = String(now.getSeconds()).padStart(2, '0');
       const customOrderId = `${DD}${MM}${YY}${HH}${mm}${SS}`;
 
+      const subtotalAfterDiscount = total - (parseFloat(discount) || 0);
+      const availCredit = shopDetails?.credits || shopDetails?.outstandingBalance || shopDetails?.creditBalance || shopDetails?.availableCredit || shopDetails?.creditLimit || 0;
+      const creditToApply = useCredit ? Math.min(availCredit, subtotalAfterDiscount) : 0;
+      const grandTotal = Math.max(0, subtotalAfterDiscount - creditToApply);
+      const received = parseFloat(receivedAmount) || 0;
+      const balance = Math.max(0, grandTotal - received);
+
       const orderData = {
         orderId: customOrderId,
         shopId: currentCheckIn.shopId,
@@ -365,19 +403,49 @@ export default function MainScreen() {
         items: orderItems,
         totalSubtotal: total,
         discount: parseFloat(discount) || 0,
-        grandTotal: total - (parseFloat(discount) || 0),
-        paymentReceived: 0,
+        grandTotal: grandTotal,
+        appliedCredit: creditToApply,
+        paymentReceived: received,
+        balance: balance,
+        paymentMethod: paymentMethod,
+        useCredit: useCredit,
         status: 'Pending',
         createdAt: now.toISOString(),
         timestamp: serverTimestamp(),
       };
 
       await setDoc(doc(db, 'orders', customOrderId), orderData);
+      
+      // Update shop's credits if credit was applied
+      if (useCredit && creditToApply > 0) {
+        console.log(`Home: Deducting ₹${creditToApply} from shop credits...`);
+        const shopRef = doc(db, 'shops', currentCheckIn.shopId);
+        await updateDoc(shopRef, {
+          credits: increment(-creditToApply)
+        });
+
+        // Add to Credit History collection
+        console.log(`Home: Recording credit history entry...`);
+        await addDoc(collection(db, 'creditHistory'), {
+          shopId: currentCheckIn.shopId,
+          shopName: currentCheckIn.shopName,
+          amount: -creditToApply,
+          type: 'Debit',
+          description: `Used for Order #${customOrderId}`,
+          orderId: customOrderId,
+          employeeId: employee?.id || user?.uid,
+          employeeName: employee?.name || 'N/A',
+          date: now.toISOString().split('T')[0],
+          timestamp: serverTimestamp(),
+        });
+      }
+      
       Alert.alert('Success', `Order #${customOrderId} saved successfully!`);
       setIsSummaryFlyoutOpen(false);
       setIsSaleOrderModalOpen(false);
       setCart({});
       setDiscount('0');
+      setReceivedAmount('0');
     } catch (error) {
       console.error('Error saving order:', error);
       Alert.alert('Error', 'Failed to save order.');
@@ -686,7 +754,7 @@ export default function MainScreen() {
                 <Text style={styles.flyoutTitle}>Order Summary</Text>
               </View>
 
-              <View style={styles.flyoutBody}>
+              <ScrollView style={styles.flyoutBody} showsVerticalScrollIndicator={false}>
                 <View style={styles.summaryRow}>
                   <Text style={styles.summaryLabelText}>Total Items</Text>
                   <Text style={styles.summaryValueText}>{Object.values(cart).reduce((a, b) => a + b, 0)}</Text>
@@ -696,10 +764,10 @@ export default function MainScreen() {
                   <Text style={styles.summaryValueText}>₹{calculateTotal()}</Text>
                 </View>
 
-                <View style={styles.discountSection}>
+                <View style={styles.inputSection}>
                   <Text style={styles.summaryLabelText}>Discount (₹)</Text>
                   <TextInput
-                    style={styles.discountInput}
+                    style={styles.summaryInput}
                     keyboardType="numeric"
                     value={discount}
                     onChangeText={setDiscount}
@@ -707,11 +775,74 @@ export default function MainScreen() {
                   />
                 </View>
 
-                <View style={styles.flyoutDivider} />
-
                 <View style={styles.summaryRow}>
                   <Text style={styles.grandTotalLabelText}>Grand Total</Text>
-                  <Text style={styles.grandTotalValueText}>₹{calculateTotal() - (parseFloat(discount) || 0)}</Text>
+                  <Text style={styles.grandTotalValueText}>
+                    ₹{Math.max(0, calculateTotal() - (parseFloat(discount) || 0) - (useCredit ? Math.min(shopDetails?.credits || shopDetails?.outstandingBalance || shopDetails?.creditBalance || shopDetails?.availableCredit || shopDetails?.creditLimit || 0, calculateTotal() - (parseFloat(discount) || 0)) : 0))}
+                  </Text>
+                </View>
+
+                <View style={styles.flyoutDivider} />
+
+                {/* Credit Toggle - Always Visible */}
+                <View style={styles.creditToggleSection}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.creditLabel}>Apply Shop Credit</Text>
+                    <Text style={styles.creditValue}>
+                      {shopDetails ? (
+                        (shopDetails.credits || shopDetails.outstandingBalance || shopDetails.creditBalance || shopDetails.availableCredit || shopDetails.creditLimit) 
+                          ? `Available: ₹${shopDetails.credits || shopDetails.outstandingBalance || shopDetails.creditBalance || shopDetails.availableCredit || shopDetails.creditLimit}`
+                          : 'No credit limit set'
+                      ) : 'Fetching credit info...'}
+                    </Text>
+                  </View>
+                  <Switch
+                    trackColor={{ false: '#DDD', true: '#C8E6C9' }}
+                    thumbColor={useCredit ? '#4CAF50' : '#F4F3F4'}
+                    onValueChange={() => {
+                      const avail = shopDetails?.credits || shopDetails?.outstandingBalance || shopDetails?.creditBalance || shopDetails?.availableCredit || shopDetails?.creditLimit || 0;
+                      if (avail > 0) {
+                        setUseCredit(!useCredit);
+                      } else {
+                        Alert.alert('No Credit', 'This shop does not have any available credit limit to use.');
+                      }
+                    }}
+                    value={useCredit}
+                    disabled={!shopDetails || !(shopDetails.credits || shopDetails.outstandingBalance || shopDetails.creditBalance || shopDetails.availableCredit || shopDetails.creditLimit > 0)}
+                  />
+                </View>
+
+                <View style={styles.inputSection}>
+                  <Text style={styles.summaryLabelText}>Received Amount (₹)</Text>
+                  <TextInput
+                    style={[styles.summaryInput, { color: '#4CAF50' }]}
+                    keyboardType="numeric"
+                    value={receivedAmount}
+                    onChangeText={setReceivedAmount}
+                    placeholder="0"
+                  />
+                </View>
+
+                <View style={styles.summaryRow}>
+                  <Text style={styles.balanceLabelText}>Balance Due</Text>
+                  <Text style={[styles.balanceValueText, (calculateTotal() - (parseFloat(discount) || 0) - (useCredit ? Math.min(shopDetails?.credits || shopDetails?.outstandingBalance || shopDetails?.creditBalance || shopDetails?.availableCredit || shopDetails?.creditLimit || 0, calculateTotal() - (parseFloat(discount) || 0)) : 0) - (parseFloat(receivedAmount) || 0)) > 0 ? { color: '#FF5252' } : { color: '#4CAF50' }]}>
+                    ₹{Math.max(0, calculateTotal() - (parseFloat(discount) || 0) - (useCredit ? Math.min(shopDetails?.credits || shopDetails?.outstandingBalance || shopDetails?.creditBalance || shopDetails?.availableCredit || shopDetails?.creditLimit || 0, calculateTotal() - (parseFloat(discount) || 0)) : 0) - (parseFloat(receivedAmount) || 0))}
+                  </Text>
+                </View>
+
+                <View style={styles.paymentMethodSection}>
+                  <Text style={styles.sectionSmallTitle}>Payment Method</Text>
+                  <View style={styles.methodGrid}>
+                    {['Cash', 'Online', 'Card'].map((method) => (
+                      <TouchableOpacity
+                        key={method}
+                        style={[styles.methodBtn, paymentMethod === method && styles.activeMethodBtn]}
+                        onPress={() => setPaymentMethod(method)}
+                      >
+                        <Text style={[styles.methodBtnText, paymentMethod === method && styles.activeMethodBtnText]}>{method}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
                 </View>
 
                 <TouchableOpacity
@@ -728,7 +859,7 @@ export default function MainScreen() {
                     </>
                   )}
                 </TouchableOpacity>
-              </View>
+              </ScrollView>
             </View>
           </View>
         )}
@@ -1207,19 +1338,19 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   flyoutTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '800',
     color: '#333',
   },
   flyoutBody: {
-    paddingHorizontal: 25,
+    paddingHorizontal: 20,
   },
   summaryLabelText: {
-    fontSize: 14,
+    fontSize: 13,
     color: '#666',
   },
   summaryValueText: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
     color: '#333',
   },
@@ -1227,54 +1358,154 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 15,
+    marginBottom: 12,
   },
-  discountSection: {
+  inputSection: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 15,
-  },
-  discountInput: {
-    width: 100,
-    height: 40,
-    backgroundColor: '#F5F5F5',
+    marginBottom: 12,
+    backgroundColor: '#fff',
+    padding: 8,
     borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#F0F0F0',
+  },
+  summaryInput: {
+    width: 100,
+    height: 36,
+    backgroundColor: '#F8F9FA',
+    borderRadius: 8,
     paddingHorizontal: 12,
     textAlign: 'right',
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
-    color: '#FF5252',
+    color: '#333',
   },
   flyoutDivider: {
     height: 1,
     backgroundColor: '#F0F0F0',
-    marginVertical: 15,
+    marginVertical: 10,
   },
   grandTotalLabelText: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '800',
     color: '#333',
   },
   grandTotalValueText: {
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: '900',
+    color: '#333',
+  },
+  creditToggleSection: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#E8F5E9',
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 12,
+  },
+  creditLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#2E7D32',
+  },
+  creditValue: {
+    fontSize: 11,
     color: '#4CAF50',
+  },
+  toggleBase: {
+    width: 44,
+    height: 24,
+    borderRadius: 12,
+    padding: 2,
+  },
+  toggleOn: {
+    backgroundColor: '#4CAF50',
+  },
+  toggleOff: {
+    backgroundColor: '#CCC',
+  },
+  toggleThumb: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#fff',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+  },
+  thumbOn: {
+    alignSelf: 'flex-end',
+  },
+  thumbOff: {
+    alignSelf: 'flex-start',
+  },
+  balanceLabelText: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#333',
+  },
+  balanceValueText: {
+    fontSize: 20,
+    fontWeight: '900',
+  },
+  paymentMethodSection: {
+    marginTop: 15,
+    marginBottom: 10,
+  },
+  sectionSmallTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#999',
+    marginBottom: 10,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  methodGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  methodBtn: {
+    flex: 1,
+    height: 38,
+    backgroundColor: '#F5F5F5',
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginHorizontal: 4,
+    borderWidth: 1,
+    borderColor: '#EEE',
+  },
+  activeMethodBtn: {
+    backgroundColor: '#4CAF50',
+    borderColor: '#4CAF50',
+  },
+  methodBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#666',
+  },
+  activeMethodBtnText: {
+    color: '#fff',
   },
   confirmSaveBtn: {
     backgroundColor: '#4CAF50',
     width: '100%',
-    paddingVertical: 18,
-    borderRadius: 20,
+    paddingVertical: 14,
+    borderRadius: 15,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 25,
-    elevation: 4,
+    marginTop: 20,
+    elevation: 3,
   },
   confirmSaveBtnText: {
     color: '#fff',
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '800',
   },
 });
