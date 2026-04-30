@@ -427,7 +427,7 @@ export default function MainScreen() {
         <View style={styles.headerRight}>
           <TouchableOpacity 
             style={styles.profileButton} 
-            onPress={() => router.push('/(main)/profile')}
+            onPress={() => router.push('/profile')}
           >
             <Ionicons name="person-circle-outline" size={28} color="#4CAF50" />
           </TouchableOpacity>
@@ -500,7 +500,7 @@ export default function MainScreen() {
           <TouchableOpacity
             style={styles.actionCard}
             activeOpacity={0.7}
-            onPress={() => router.push('/(main)/orders')}
+            onPress={() => router.push('/orders')}
           >
             <View style={[styles.actionIcon, { backgroundColor: '#F3E5F5' }]}>
               <Ionicons name="receipt" size={28} color="#9C27B0" />
@@ -510,18 +510,55 @@ export default function MainScreen() {
         </View>
 
         <View style={[styles.actionsGrid, { marginTop: 15 }]}>
+          {/* Payments Card */}
+          <TouchableOpacity
+            style={styles.actionCard}
+            activeOpacity={0.7}
+            onPress={() => router.push('/payments')}
+          >
+            <View style={[styles.actionIcon, { backgroundColor: '#E1F5FE' }]}>
+              <Ionicons name="wallet" size={28} color="#03A9F4" />
+            </View>
+            <Text style={styles.actionTitle}>Payments</Text>
+          </TouchableOpacity>
+
+          {/* Return Orders Card */}
+          <TouchableOpacity
+            style={styles.actionCard}
+            activeOpacity={0.7}
+            onPress={() => router.push('/return_orders')}
+          >
+            <View style={[styles.actionIcon, { backgroundColor: '#FFF3E0' }]}>
+              <Ionicons name="refresh-circle" size={28} color="#FF9800" />
+            </View>
+            <Text style={styles.actionTitle}>Return Orders</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={[styles.actionsGrid, { marginTop: 15 }]}>
           {/* Customer Orders Card */}
           <TouchableOpacity
             style={styles.actionCard}
             activeOpacity={0.7}
-            onPress={() => router.push('/(main)/customer_orders')}
+            onPress={() => router.push('/customer_orders')}
           >
             <View style={[styles.actionIcon, { backgroundColor: '#E8F5E9' }]}>
               <Ionicons name="people" size={28} color="#4CAF50" />
             </View>
             <Text style={styles.actionTitle}>Customer Orders</Text>
           </TouchableOpacity>
-          <View style={{ width: (width - 60) / 2 }} />
+
+          {/* Metrics Card */}
+          <TouchableOpacity
+            style={styles.actionCard}
+            activeOpacity={0.7}
+            onPress={() => router.push('/metrics')}
+          >
+            <View style={[styles.actionIcon, { backgroundColor: '#FCE4EC' }]}>
+              <Ionicons name="bar-chart" size={28} color="#E91E63" />
+            </View>
+            <Text style={styles.actionTitle}>Metrics</Text>
+          </TouchableOpacity>
         </View>
       </ScrollView>
 
