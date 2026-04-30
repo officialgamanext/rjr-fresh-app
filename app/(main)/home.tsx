@@ -394,23 +394,34 @@ export default function MainScreen() {
       const balance = Math.max(0, grandTotal - received);
 
       const orderData = {
-        orderId: customOrderId,
+        locationId: shopDetails?.locationId || '',
         shopId: currentCheckIn.shopId,
         shopName: currentCheckIn.shopName,
-        employeeId: employee?.id || user?.uid,
-        employeeName: employee?.name || 'N/A',
-        employeeMobile: employee?.mobile || 'N/A',
-        items: orderItems,
+        orderId: customOrderId,
+        items: orderItems.map(item => ({
+          itemId: item.itemId,
+          itemName: item.itemName,
+          quantity: item.quantity,
+          price: item.price,
+          subtotal: item.subtotal,
+          batchNumber: '' // Added for compatibility
+        })),
         totalSubtotal: total,
         discount: parseFloat(discount) || 0,
+        creditsUsed: creditToApply,
         grandTotal: grandTotal,
-        appliedCredit: creditToApply,
         paymentReceived: received,
         balance: balance,
+        paymentStatus: balance <= 0 ? 'Paid' : (received > 0 ? 'Partial' : 'Unpaid'),
         paymentMethod: paymentMethod,
-        useCredit: useCredit,
-        status: 'Pending',
+        assignedTo: employee?.id || user?.uid,
+        employeeId: employee?.id || user?.uid,
+        assignedToName: employee?.name || 'N/A',
+        employeeMobile: employee?.mobile || 'N/A',
+        type: 'B2B',
+        status: 'Ordered', // Default Admin status
         createdAt: now.toISOString(),
+        updatedAt: now.toISOString(),
         timestamp: serverTimestamp(),
       };
 
@@ -424,14 +435,25 @@ export default function MainScreen() {
           credits: increment(-creditToApply)
         });
 
-        // Add to Credit History collection
-        console.log(`Home: Recording credit history entry...`);
+        // Add to Credit History collection - Matching Admin Panel exactly
         await addDoc(collection(db, 'creditHistory'), {
           shopId: currentCheckIn.shopId,
-          shopName: currentCheckIn.shopName,
-          amount: -creditToApply,
-          type: 'Debit',
+          amount: creditToApply,
+          type: 'used',
           description: `Used for Order #${customOrderId}`,
+          createdAt: now.toISOString()
+        });
+      }
+
+      // Record Payment in payments collection if payment was received
+      if (received > 0) {
+        console.log(`Home: Recording payment of ₹${received}...`);
+        await addDoc(collection(db, 'payments'), {
+          shopId: currentCheckIn.shopId,
+          shopName: currentCheckIn.shopName,
+          amount: received,
+          paymentMethod: paymentMethod,
+          type: 'Order Payment',
           orderId: customOrderId,
           employeeId: employee?.id || user?.uid,
           employeeName: employee?.name || 'N/A',
