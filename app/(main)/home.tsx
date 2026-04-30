@@ -20,7 +20,7 @@ import { useAuth } from '../../context/AuthContext';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { db } from '../../config/firebase';
-import { collection, getDocs, addDoc, serverTimestamp, query, where, orderBy, setDoc, doc, getDoc, updateDoc, increment } from 'firebase/firestore';
+import { collection, getDocs, addDoc, serverTimestamp, query, where, orderBy, setDoc, doc, getDoc, updateDoc, increment, limit } from 'firebase/firestore';
 import * as Location from 'expo-location';
 
 const { width } = Dimensions.get('window');
@@ -67,6 +67,11 @@ export default function MainScreen() {
   const [useCredit, setUseCredit] = useState(false);
   const [shopDetails, setShopDetails] = useState<any>(null);
   const [isSummaryFlyoutOpen, setIsSummaryFlyoutOpen] = useState(false);
+  const [batches, setBatches] = useState<any[]>([]);
+  const [orderStatus, setOrderStatus] = useState('Ordered');
+  const [orderItems, setOrderItems] = useState<any[]>([]);
+  const [batchPickerVisible, setBatchPickerVisible] = useState(false);
+  const [selectedItemForBatch, setSelectedItemForBatch] = useState<string | null>(null);
 
   // Fetch employee details on mount
   useEffect(() => {
@@ -97,7 +102,20 @@ export default function MainScreen() {
       }
     };
     fetchEmployee();
+    fetchBatches();
   }, [user]);
+
+  const fetchBatches = async () => {
+    try {
+      const q = query(collection(db, 'batches'), orderBy('createdAt', 'desc'), limit(15));
+      const snap = await getDocs(q);
+      const batchList: any[] = [];
+      snap.forEach(doc => batchList.push({ id: doc.id, ...doc.data() }));
+      setBatches(batchList);
+    } catch (error) {
+      console.error("Home: Error fetching batches:", error);
+    }
+  };
 
   const handleLogout = () => {
     Alert.alert('Logout', 'Are you sure you want to logout?', [
@@ -327,6 +345,7 @@ export default function MainScreen() {
       snap.forEach((doc) => items.push({ id: doc.id, ...doc.data() }));
       setPriceListItems(items);
       setCart({}); // Reset cart
+      setOrderItems([]);
       setDiscount('0');
       setReceivedAmount('0');
       setPaymentMethod('Cash');
@@ -339,22 +358,30 @@ export default function MainScreen() {
     }
   };
 
-  const updateCart = (itemId: string, delta: number) => {
+  const updateQuantity = (itemId: string, delta: number) => {
     setCart((prev) => {
       const newQty = (prev[itemId] || 0) + delta;
+      const updatedCart = { ...prev, [itemId]: newQty };
       if (newQty <= 0) {
-        const { [itemId]: _, ...rest } = prev;
-        return rest;
+        delete updatedCart[itemId];
+        setOrderItems(orderItems.filter(item => item.itemId !== itemId));
+      } else {
+        const item = priceListItems.find(i => i.id === itemId);
+        if (item) {
+          const exists = orderItems.find(oi => oi.itemId === itemId);
+          if (exists) {
+            setOrderItems(orderItems.map(oi => oi.itemId === itemId ? { ...oi, quantity: newQty } : oi));
+          } else {
+            setOrderItems([...orderItems, { itemId: item.id, itemName: item.itemName, price: item.price, quantity: newQty, unit: item.itemUnit, batchNumber: '' }]);
+          }
+        }
       }
-      return { ...prev, [itemId]: newQty };
+      return updatedCart;
     });
   };
 
   const calculateTotal = () => {
-    return priceListItems.reduce((acc, item) => {
-      const qty = cart[item.id] || 0;
-      return acc + item.price * qty;
-    }, 0);
+    return orderItems.reduce((acc, item) => acc + (item.price * item.quantity), 0);
   };
 
   const handleSaveOrder = async () => {
@@ -366,17 +393,6 @@ export default function MainScreen() {
 
     setSavingOrder(true);
     try {
-      const orderItems = priceListItems
-        .filter((item) => cart[item.id] > 0)
-        .map((item) => ({
-          itemId: item.itemId,
-          itemName: item.itemName,
-          price: item.price,
-          quantity: cart[item.id],
-          unit: item.itemUnit,
-          subtotal: item.price * cart[item.id],
-        }));
-
       const now = new Date();
       const DD = String(now.getDate()).padStart(2, '0');
       const MM = String(now.getMonth() + 1).padStart(2, '0');
@@ -398,14 +414,7 @@ export default function MainScreen() {
         shopId: currentCheckIn.shopId,
         shopName: currentCheckIn.shopName,
         orderId: customOrderId,
-        items: orderItems.map(item => ({
-          itemId: item.itemId,
-          itemName: item.itemName,
-          quantity: item.quantity,
-          price: item.price,
-          subtotal: item.subtotal,
-          batchNumber: '' // Added for compatibility
-        })),
+        items: orderItems,
         totalSubtotal: total,
         discount: parseFloat(discount) || 0,
         creditsUsed: creditToApply,
@@ -419,7 +428,7 @@ export default function MainScreen() {
         assignedToName: employee?.name || 'N/A',
         employeeMobile: employee?.mobile || 'N/A',
         type: 'B2B',
-        status: 'Ordered', // Default Admin status
+        status: orderStatus,
         createdAt: now.toISOString(),
         updatedAt: now.toISOString(),
         timestamp: serverTimestamp(),
@@ -435,7 +444,7 @@ export default function MainScreen() {
           credits: increment(-creditToApply)
         });
 
-        // Add to Credit History collection - Matching Admin Panel exactly
+        // Add to Credit History collection
         await addDoc(collection(db, 'creditHistory'), {
           shopId: currentCheckIn.shopId,
           amount: creditToApply,
@@ -466,6 +475,7 @@ export default function MainScreen() {
       setIsSummaryFlyoutOpen(false);
       setIsSaleOrderModalOpen(false);
       setCart({});
+      setOrderItems([]);
       setDiscount('0');
       setReceivedAmount('0');
     } catch (error) {
@@ -477,29 +487,51 @@ export default function MainScreen() {
   };
 
   const renderOrderItem = ({ item }: { item: any }) => {
-    const qty = cart[item.id] || 0;
+    const orderItem = orderItems.find(oi => oi.itemId === item.id);
+    const quantity = orderItem?.quantity || 0;
+    const batchNumber = orderItem?.batchNumber || '';
+
     return (
       <View style={styles.orderItemCard}>
-        <View style={styles.orderItemInfo}>
-          <Text style={styles.orderItemName}>{item.itemName}</Text>
-          <Text style={styles.orderItemPrice}>₹{item.price} / {item.itemUnit}</Text>
+        <View style={styles.itemMainRow}>
+          <View style={styles.orderItemInfo}>
+            <Text style={styles.orderItemName}>{item.itemName}</Text>
+            <Text style={styles.orderItemPrice}>₹{item.price} / {item.itemUnit}</Text>
+          </View>
+          <View style={styles.itemQuantityContainer}>
+            <TouchableOpacity 
+              onPress={() => updateQuantity(item.id, -1)}
+              style={styles.quantityBtn}
+            >
+              <Ionicons name="remove" size={16} color={quantity > 0 ? "#4CAF50" : "#CCC"} />
+            </TouchableOpacity>
+            <Text style={styles.quantityText}>{quantity}</Text>
+            <TouchableOpacity 
+              onPress={() => updateQuantity(item.id, 1)}
+              style={styles.quantityBtn}
+            >
+              <Ionicons name="add" size={16} color="#4CAF50" />
+            </TouchableOpacity>
+          </View>
         </View>
-        <View style={styles.qtyControls}>
-          <TouchableOpacity
-            style={styles.qtyBtn}
-            onPress={() => updateCart(item.id, -1)}
-            disabled={qty === 0}
-          >
-            <Ionicons name="remove" size={20} color={qty === 0 ? '#CCC' : '#4CAF50'} />
-          </TouchableOpacity>
-          <Text style={styles.qtyText}>{qty}</Text>
-          <TouchableOpacity
-            style={styles.qtyBtn}
-            onPress={() => updateCart(item.id, 1)}
-          >
-            <Ionicons name="add" size={20} color="#4CAF50" />
-          </TouchableOpacity>
-        </View>
+        
+        {/* Batch Selection Row - Only show if quantity > 0 */}
+        {quantity > 0 && (
+          <View style={styles.itemBatchRow}>
+            <Ionicons name="layers-outline" size={14} color="#666" style={{ marginRight: 6 }} />
+            <Text style={styles.batchLabel}>Batch:</Text>
+            <TouchableOpacity 
+              style={styles.batchValueBtn}
+              onPress={() => {
+                setSelectedItemForBatch(item.id);
+                setBatchPickerVisible(true);
+              }}
+            >
+              <Text style={styles.batchValueText}>{batchNumber || 'Select Batch'}</Text>
+              <Ionicons name="chevron-down" size={12} color="#4CAF50" />
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
     );
   };
@@ -748,7 +780,7 @@ export default function MainScreen() {
           {/* Bottom Summary Bar */}
           <View style={styles.summaryBar}>
             <View style={styles.summaryInfo}>
-              <Text style={styles.summaryLabel}>Subtotal ({Object.values(cart).reduce((a, b) => a + b, 0)} items)</Text>
+              <Text style={styles.summaryLabel}>Subtotal ({orderItems.length} items)</Text>
               <Text style={styles.summaryValue}>₹{calculateTotal()}</Text>
             </View>
             <TouchableOpacity
@@ -853,9 +885,24 @@ export default function MainScreen() {
                 </View>
 
                 <View style={styles.paymentMethodSection}>
+                  <Text style={styles.sectionSmallTitle}>Order Status</Text>
+                  <View style={styles.methodGrid}>
+                    {['Ordered', 'Shipped', 'Delivered'].map((status) => (
+                      <TouchableOpacity
+                        key={status}
+                        style={[styles.methodBtn, orderStatus === status && styles.activeMethodBtn]}
+                        onPress={() => setOrderStatus(status)}
+                      >
+                        <Text style={[styles.methodBtnText, orderStatus === status && styles.activeMethodBtnText]}>{status}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+
+                <View style={styles.paymentMethodSection}>
                   <Text style={styles.sectionSmallTitle}>Payment Method</Text>
                   <View style={styles.methodGrid}>
-                    {['Cash', 'Online', 'Card'].map((method) => (
+                    {['Cash', 'UPI', 'Card'].map((method) => (
                       <TouchableOpacity
                         key={method}
                         style={[styles.methodBtn, paymentMethod === method && styles.activeMethodBtn]}
@@ -885,6 +932,51 @@ export default function MainScreen() {
             </View>
           </View>
         )}
+      </Modal>
+
+      {/* Batch Picker Modal */}
+      <Modal
+        visible={batchPickerVisible}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setBatchPickerVisible(false)}
+      >
+        <View style={styles.pickerOverlay}>
+          <View style={styles.pickerContent}>
+            <View style={styles.pickerHeader}>
+              <Text style={styles.pickerTitle}>Select Batch</Text>
+              <TouchableOpacity onPress={() => setBatchPickerVisible(false)}>
+                <Ionicons name="close" size={24} color="#333" />
+              </TouchableOpacity>
+            </View>
+            <FlatList
+              data={batches}
+              keyExtractor={(item) => item.id}
+              renderItem={({ item }) => (
+                <TouchableOpacity 
+                  style={styles.batchItem}
+                  onPress={() => {
+                    setOrderItems(prev => prev.map(oi => 
+                      oi.itemId === selectedItemForBatch ? { ...oi, batchNumber: item.batchNumber } : oi
+                    ));
+                    setBatchPickerVisible(false);
+                  }}
+                >
+                  <Ionicons name="cube-outline" size={18} color="#4CAF50" />
+                  <Text style={styles.batchItemText}>{item.batchNumber}</Text>
+                  {orderItems.find(oi => oi.itemId === selectedItemForBatch)?.batchNumber === item.batchNumber && (
+                    <Ionicons name="checkmark-circle" size={20} color="#4CAF50" style={{ marginLeft: 'auto' }} />
+                  )}
+                </TouchableOpacity>
+              )}
+              ListEmptyComponent={
+                <View style={{ padding: 40, alignItems: 'center' }}>
+                  <Text style={{ color: '#999' }}>No batches available.</Text>
+                </View>
+              }
+            />
+          </View>
+        </View>
       </Modal>
     </SafeAreaView>
   );
@@ -1170,15 +1262,30 @@ const styles = StyleSheet.create({
     paddingBottom: 100,
   },
   orderItemCard: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#F9F9F9',
+    backgroundColor: '#fff',
     padding: 15,
     borderRadius: 15,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: '#EEE',
+    borderColor: '#F0F0F0',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 5,
+  },
+  itemMainRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  itemBatchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#F5F5F5',
   },
   orderItemInfo: {
     flex: 1,
@@ -1193,14 +1300,14 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
   },
-  qtyControls: {
+  itemQuantityContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fff',
+    backgroundColor: '#F8F9FA',
     borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#EEE',
     padding: 4,
+    borderWidth: 1,
+    borderColor: '#E9ECEF',
   },
   qtyBtn: {
     width: 36,
@@ -1208,11 +1315,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  qtyText: {
-    fontSize: 16,
+  quantityText: {
+    fontSize: 15,
     fontWeight: '800',
     color: '#333',
-    marginHorizontal: 15,
+    marginHorizontal: 12,
     minWidth: 20,
     textAlign: 'center',
   },
@@ -1514,6 +1621,32 @@ const styles = StyleSheet.create({
   activeMethodBtnText: {
     color: '#fff',
   },
+  batchSelectorContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginLeft: 15,
+    backgroundColor: '#F0F0F0',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  batchLabel: {
+    fontSize: 11,
+    color: '#666',
+    marginRight: 4,
+    fontWeight: '600',
+  },
+  batchValueBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  batchValueText: {
+    fontSize: 12,
+    color: '#333',
+    fontWeight: '700',
+    marginRight: 2,
+  },
   confirmSaveBtn: {
     backgroundColor: '#4CAF50',
     width: '100%',
@@ -1529,5 +1662,47 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '800',
+  },
+  // Picker Styles
+  pickerOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  pickerContent: {
+    width: '100%',
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    maxHeight: '60%',
+    padding: 20,
+  },
+  pickerHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+    paddingBottom: 15,
+  },
+  pickerTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#333',
+  },
+  batchItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F5F5F5',
+  },
+  batchItemText: {
+    fontSize: 16,
+    color: '#333',
+    marginLeft: 12,
+    fontWeight: '600',
   },
 });
