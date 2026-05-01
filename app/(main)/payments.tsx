@@ -1,26 +1,405 @@
-import React from 'react';
-import { StyleSheet, View, Text, TouchableOpacity } from 'react-native';
+import React, { useState, useEffect, useMemo } from 'react';
+import {
+  StyleSheet,
+  View,
+  Text,
+  TouchableOpacity,
+  ScrollView,
+  TextInput,
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  KeyboardAvoidingView,
+  Platform,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { db } from '../../config/firebase';
+import {
+  collection,
+  query,
+  where,
+  getDocs,
+  getDoc,
+  doc,
+  writeBatch,
+  onSnapshot,
+  serverTimestamp,
+  addDoc,
+  increment,
+  updateDoc
+} from 'firebase/firestore';
+import { useAuth } from '../../context/AuthContext';
 
 export default function PaymentsScreen() {
   const router = useRouter();
+  const { user } = useAuth();
+  
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [currentCheckIn, setCurrentCheckIn] = useState<any>(null);
+  const [shopDetails, setShopDetails] = useState<any>(null);
+  const [pendingOrders, setPendingOrders] = useState<any[]>([]);
+  const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
+  const [amount, setAmount] = useState('0');
+  const [shopTotals, setShopTotals] = useState({ totalPaid: 0, totalDue: 0 });
+
+  // 1. Fetch current check-in and shop details
+  useEffect(() => {
+    const fetchContext = async () => {
+      if (!user?.uid) return;
+      
+      try {
+        const now = new Date();
+        const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+        
+        const q = query(
+          collection(db, 'checkins'),
+          where('userId', '==', user.uid),
+          where('date', '==', today),
+          where('status', '==', 'Active')
+        );
+        
+        const snap = await getDocs(q);
+        if (snap.empty) {
+          Alert.alert('No Active Check-in', 'Please check-in to a shop first to collect payments.', [
+            { text: 'OK', onPress: () => router.back() }
+          ]);
+          return;
+        }
+
+        const checkInData = { id: snap.docs[0].id, ...snap.docs[0].data() };
+        setCurrentCheckIn(checkInData);
+
+        // Fetch fresh shop details
+        const shopRef = doc(db, 'shops', (checkInData as any).shopId);
+        const shopSnap = await getDoc(shopRef);
+        if (shopSnap.exists()) {
+          setShopDetails({ id: shopSnap.id, ...shopSnap.data() });
+        }
+      } catch (err) {
+        console.error('Error fetching context:', err);
+        Alert.alert('Error', 'Failed to load check-in details.');
+      }
+    };
+
+    fetchContext();
+  }, [user]);
+
+  // 2. Real-time listener for pending orders
+  useEffect(() => {
+    if (!currentCheckIn?.shopId) return;
+
+    const q = query(
+      collection(db, 'orders'),
+      where('shopId', '==', currentCheckIn.shopId)
+    );
+
+    const unsubscribe = onSnapshot(q, (snap) => {
+      const pending: any[] = [];
+      let totalDueSum = 0;
+      let totalPaidSum = 0;
+      const initialIds = new Set<string>();
+
+      // Robust check for both shopId and shopID locally if needed,
+      // but Firestore query is already filtered by shopId. 
+      // We'll focus on field parsing fallbacks.
+      snap.docs.forEach(docSnap => {
+        const d = docSnap.data();
+        const grandTotal = parseFloat(d.grandTotal || d.total || d.totalAmount || 0);
+        const paid = parseFloat(d.paymentReceived || d.paidAmount || 0);
+        const balanceField = d.balance !== undefined ? parseFloat(d.balance) : null;
+        
+        const due = balanceField !== null ? balanceField : (grandTotal - paid);
+        
+        totalPaidSum += paid;
+        totalDueSum += due;
+
+        if (Math.abs(due) > 0.01) {
+          pending.push({ 
+            id: docSnap.id, 
+            ...d, 
+            pendingAmount: due,
+            grandTotal,
+            paymentReceived: paid
+          });
+          initialIds.add(docSnap.id);
+        }
+      });
+
+      // Sort locally FIFO
+      pending.sort((a, b) => {
+        const timeA = new Date(a.createdAt || 0).getTime();
+        const timeB = new Date(b.createdAt || 0).getTime();
+        return timeA - timeB;
+      });
+
+      setPendingOrders(pending);
+      setShopTotals({ totalPaid: totalPaidSum, totalDue: totalDueSum });
+      setSelectedOrderIds(initialIds);
+      
+      const totalToPay = pending.reduce((sum, o) => sum + o.pendingAmount, 0);
+      setAmount(totalToPay.toFixed(2));
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [currentCheckIn]);
+
+  // Handle Amount Change -> Auto-select orders
+  const handleAmountChange = (val: string) => {
+    setAmount(val);
+    const numVal = parseFloat(val) || 0;
+    let remaining = numVal;
+    const newSelected = new Set<string>();
+
+    for (const order of pendingOrders) {
+      if (remaining <= 0) break;
+      newSelected.add(order.id);
+      remaining -= order.pendingAmount;
+    }
+    setSelectedOrderIds(newSelected);
+  };
+
+  // Handle Checkbox Change -> Update Amount
+  const toggleOrderSelection = (orderId: string) => {
+    const newSelected = new Set(selectedOrderIds);
+    if (newSelected.has(orderId)) {
+      newSelected.delete(orderId);
+    } else {
+      newSelected.add(orderId);
+    }
+    setSelectedOrderIds(newSelected);
+
+    let newAmount = 0;
+    pendingOrders.forEach(o => {
+      if (newSelected.has(o.id)) {
+        newAmount += o.pendingAmount;
+      }
+    });
+    setAmount(newAmount.toFixed(2));
+  };
+
+  const handleSave = async () => {
+    const pAmount = parseFloat(amount);
+    if (!pAmount || pAmount <= 0) {
+      Alert.alert('Invalid Amount', 'Please enter a valid payment amount.');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const batch = writeBatch(db);
+      let remainingPayment = pAmount;
+      let distributedAmount = 0;
+
+      const ordersToApply = pendingOrders.filter(o => selectedOrderIds.has(o.id));
+      
+      for (const order of ordersToApply) {
+        if (remainingPayment <= 0) break;
+
+        const applied = Math.min(order.pendingAmount, remainingPayment);
+        remainingPayment -= applied;
+        distributedAmount += applied;
+
+        const newReceived = (parseFloat(order.paymentReceived) || 0) + applied;
+        const newBalance = Math.max(0, (parseFloat(order.grandTotal) || 0) - newReceived);
+        const newStatus = newBalance <= 0.01 ? 'Paid' : 'Partial';
+
+        batch.update(doc(db, 'orders', order.id), {
+          paymentReceived: newReceived,
+          balance: newBalance,
+          paymentStatus: newStatus,
+          updatedAt: new Date().toISOString()
+        });
+      }
+
+      // Add payment record
+      const paymentRef = doc(collection(db, 'payments'));
+      batch.set(paymentRef, {
+        shopId: currentCheckIn.shopId,
+        shopName: currentCheckIn.shopName,
+        amount: pAmount,
+        distributedAmount: distributedAmount,
+        unallocatedAmount: Math.max(0, remainingPayment),
+        employeeId: user?.uid,
+        employeeName: currentCheckIn.employeeName || 'N/A',
+        date: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+        timestamp: serverTimestamp(),
+      });
+
+      // Handle overpayment (Credits)
+      if (remainingPayment > 0.01) {
+        const shopRef = doc(db, 'shops', currentCheckIn.shopId);
+        batch.update(shopRef, {
+          credits: increment(remainingPayment)
+        });
+
+        const creditRef = doc(collection(db, 'creditHistory'));
+        batch.set(creditRef, {
+          shopId: currentCheckIn.shopId,
+          amount: remainingPayment,
+          type: 'overpayment',
+          description: `Overpayment from ₹${pAmount} payment collected by app`,
+          createdAt: new Date().toISOString()
+        });
+      }
+
+      await batch.commit();
+      Alert.alert('Success', 'Payment collected successfully!');
+      router.back();
+    } catch (err) {
+      console.error('Save error:', err);
+      Alert.alert('Error', 'Failed to process payment.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const renderOrderItem = ({ item, index }: { item: any, index: number }) => {
+    const isSelected = selectedOrderIds.has(item.id);
+    
+    // Preview allocation
+    let currentRemaining = parseFloat(amount) || 0;
+    pendingOrders.slice(0, index).forEach(o => {
+      if (selectedOrderIds.has(o.id)) {
+        currentRemaining -= o.pendingAmount;
+      }
+    });
+    
+    const allocation = isSelected ? Math.max(0, Math.min(item.pendingAmount, currentRemaining)) : 0;
+    const finalReceived = (parseFloat(item.paymentReceived) || 0) + allocation;
+    const isPaid = finalReceived >= (parseFloat(item.grandTotal) || 0) - 0.01;
+
+    return (
+      <TouchableOpacity 
+        key={item.id}
+        style={[styles.orderCard, isSelected && styles.orderCardSelected]}
+        onPress={() => toggleOrderSelection(item.id)}
+        activeOpacity={0.7}
+      >
+        <View style={styles.orderCardHeader}>
+          <View style={styles.orderIdContainer}>
+            <Ionicons 
+              name={isSelected ? "checkbox" : "square-outline"} 
+              size={22} 
+              color={isSelected ? "#4CAF50" : "#94A3B8"} 
+            />
+            <Text style={styles.orderIdText}>#{item.id.slice(-6).toUpperCase()}</Text>
+          </View>
+          <Text style={styles.orderAmountText}>₹{item.pendingAmount.toFixed(2)}</Text>
+        </View>
+        
+        <View style={styles.orderCardFooter}>
+          <Text style={styles.orderDateText}>{new Date(item.createdAt || 0).toLocaleDateString()}</Text>
+          <View style={[
+            styles.statusBadge, 
+            { backgroundColor: isPaid ? '#DCFCE7' : (allocation > 0 ? '#FEF3C7' : '#FEE2E2') }
+          ]}>
+            <Text style={[
+              styles.statusText, 
+              { color: isPaid ? '#166534' : (allocation > 0 ? '#92400E' : '#991B1B') }
+            ]}>
+              {isPaid ? 'Will be Paid' : (allocation > 0 ? 'Partial' : 'Pending')}
+            </Text>
+          </View>
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  if (loading && !currentCheckIn) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator size="large" color="#4CAF50" />
+      </View>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color="#333" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Payments</Text>
-        <View style={{ width: 40 }} />
-      </View>
-      <View style={styles.content}>
-        <Ionicons name="wallet-outline" size={80} color="#CCC" />
-        <Text style={styles.title}>Payments Module</Text>
-        <Text style={styles.subtitle}>Coming Soon</Text>
-      </View>
+      <KeyboardAvoidingView 
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={{ flex: 1 }}
+      >
+        {/* Header */}
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+            <Ionicons name="arrow-back" size={24} color="#333" />
+          </TouchableOpacity>
+          <View style={styles.headerTitleContainer}>
+            <Text style={styles.headerTitle}>Collect Payment</Text>
+            <Text style={styles.headerSubtitle}>{currentCheckIn?.shopName}</Text>
+          </View>
+          <View style={{ width: 40 }} />
+        </View>
+
+        <ScrollView contentContainerStyle={styles.scrollContent}>
+          {/* Shop Summary */}
+          <View style={styles.summaryContainer}>
+            <View style={[styles.summaryCard, { backgroundColor: '#F0FDF4' }]}>
+              <Text style={[styles.summaryLabel, { color: '#166534' }]}>TOTAL RECEIVED</Text>
+              <Text style={[styles.summaryValue, { color: '#14532D' }]}>₹{shopTotals.totalPaid.toFixed(0)}</Text>
+            </View>
+            <View style={[styles.summaryCard, { backgroundColor: '#FEF2F2' }]}>
+              <Text style={[styles.summaryLabel, { color: '#991B1B' }]}>TOTAL DUE</Text>
+              <Text style={[styles.summaryValue, { color: '#7F1D1D' }]}>₹{shopTotals.totalDue.toFixed(0)}</Text>
+            </View>
+          </View>
+
+          {/* Amount Input */}
+          <View style={styles.inputSection}>
+            <Text style={styles.inputLabel}>Received Amount (₹)</Text>
+            <View style={styles.inputWrapper}>
+              <Text style={styles.currencySymbol}>₹</Text>
+              <TextInput
+                style={styles.amountInput}
+                keyboardType="numeric"
+                value={amount}
+                onChangeText={handleAmountChange}
+                placeholder="0.00"
+              />
+            </View>
+          </View>
+
+          {/* Orders List Section */}
+          <View style={styles.listSection}>
+            <View style={styles.listHeader}>
+              <Text style={styles.listTitle}>ALLOCATE TO ORDERS</Text>
+              <Text style={styles.pendingCount}>{pendingOrders.length} Pending</Text>
+            </View>
+
+            {pendingOrders.length === 0 ? (
+              <View style={styles.emptyContainer}>
+                <Ionicons name="checkmark-done-circle" size={48} color="#CBD5E1" />
+                <Text style={styles.emptyText}>No pending orders for this shop.</Text>
+              </View>
+            ) : (
+              pendingOrders.map((item, index) => renderOrderItem({ item, index }))
+            )}
+          </View>
+        </ScrollView>
+
+        {/* Action Button */}
+        <View style={styles.footer}>
+          <TouchableOpacity 
+            style={[styles.confirmButton, (saving || !amount || parseFloat(amount) <= 0) && styles.disabledButton]}
+            onPress={handleSave}
+            disabled={saving || !amount || parseFloat(amount) <= 0}
+          >
+            {saving ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <>
+                <Text style={styles.confirmButtonText}>Confirm Payment ₹{parseFloat(amount || '0').toFixed(2)}</Text>
+                <Ionicons name="checkmark-circle" size={20} color="#fff" />
+              </>
+            )}
+          </TouchableOpacity>
+        </View>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -28,45 +407,207 @@ export default function PaymentsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F8F9FA',
+    backgroundColor: '#fff',
+  },
+  center: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 15,
-    backgroundColor: '#fff',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
+    borderBottomColor: '#F1F5F9',
   },
   backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    justifyContent: 'center',
+    padding: 8,
+  },
+  headerTitleContainer: {
+    flex: 1,
     alignItems: 'center',
   },
   headerTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#333',
+    color: '#1E293B',
   },
-  content: {
+  headerSubtitle: {
+    fontSize: 12,
+    color: '#64748B',
+    marginTop: 2,
+  },
+  scrollContent: {
+    padding: 16,
+  },
+  summaryContainer: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 24,
+  },
+  summaryCard: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
+    padding: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.05)',
   },
-  title: {
-    fontSize: 24,
+  summaryLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    marginBottom: 4,
+  },
+  summaryValue: {
+    fontSize: 20,
     fontWeight: '800',
-    color: '#333',
-    marginTop: 20,
   },
-  subtitle: {
+  inputSection: {
+    marginBottom: 24,
+  },
+  inputLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#64748B',
+    marginBottom: 8,
+  },
+  inputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    paddingHorizontal: 16,
+  },
+  currencySymbol: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#1E293B',
+    marginRight: 8,
+  },
+  amountInput: {
+    flex: 1,
+    height: 56,
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#1E293B',
+  },
+  listSection: {
+    flex: 1,
+  },
+  listHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  listTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#94A3B8',
+    letterSpacing: 1,
+  },
+  pendingCount: {
+    fontSize: 12,
+    color: '#64748B',
+  },
+  orderCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#F1F5F9',
+  },
+  orderCardSelected: {
+    borderColor: '#4CAF50',
+    backgroundColor: '#F0FDF4',
+  },
+  orderCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  orderIdContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  orderIdText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1E293B',
+  },
+  orderAmountText: {
     fontSize: 16,
-    color: '#666',
-    marginTop: 10,
+    fontWeight: '700',
+    color: '#1E293B',
+  },
+  orderCardFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  orderDateText: {
+    fontSize: 12,
+    color: '#94A3B8',
+  },
+  statusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  statusText: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  emptyContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderStyle: 'dashed',
+  },
+  emptyText: {
+    marginTop: 12,
+    color: '#64748B',
+    fontSize: 14,
+  },
+  footer: {
+    padding: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+    backgroundColor: '#fff',
+  },
+  confirmButton: {
+    backgroundColor: '#4CAF50',
+    height: 56,
+    borderRadius: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    shadowColor: '#4CAF50',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  disabledButton: {
+    backgroundColor: '#CBD5E1',
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  confirmButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
   },
 });
