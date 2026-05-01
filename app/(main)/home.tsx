@@ -922,20 +922,30 @@ export default function MainScreen() {
                   </View>
                 </View>
 
-                <TouchableOpacity
-                  style={[styles.confirmSaveBtn, savingOrder && styles.disabledSaveBtn]}
-                  onPress={handleSaveOrder}
-                  disabled={savingOrder}
-                >
-                  {savingOrder ? (
-                    <ActivityIndicator color="#fff" />
-                  ) : (
-                    <>
-                      <Text style={styles.confirmSaveBtnText}>Confirm & Save Order</Text>
-                      <Ionicons name="checkmark-circle" size={22} color="#fff" style={{ marginLeft: 8 }} />
-                    </>
-                  )}
-                </TouchableOpacity>
+                <View style={styles.flyoutFooterActions}>
+                  <TouchableOpacity
+                    style={styles.cancelBtn}
+                    onPress={() => setIsSummaryFlyoutOpen(false)}
+                    disabled={savingOrder}
+                  >
+                    <Text style={styles.cancelBtnText}>Cancel</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.confirmSaveBtn, savingOrder && styles.disabledSaveBtn]}
+                    onPress={handleSaveOrder}
+                    disabled={savingOrder}
+                  >
+                    {savingOrder ? (
+                      <ActivityIndicator color="#fff" />
+                    ) : (
+                      <>
+                        <Text style={styles.confirmSaveBtnText}>Confirm & Save</Text>
+                        <Ionicons name="checkmark-circle" size={18} color="#fff" style={{ marginLeft: 6 }} />
+                      </>
+                    )}
+                  </TouchableOpacity>
+                </View>
               </ScrollView>
             </View>
           </View>
@@ -1673,19 +1683,39 @@ const styles = StyleSheet.create({
   },
   confirmSaveBtn: {
     backgroundColor: '#4CAF50',
-    width: '100%',
+    flex: 1,
     paddingVertical: 14,
     borderRadius: 15,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 20,
     elevation: 3,
   },
   confirmSaveBtnText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '800',
+  },
+  flyoutFooterActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 20,
+    gap: 12,
+  },
+  cancelBtn: {
+    flex: 1,
+    backgroundColor: '#F5F5F5',
+    paddingVertical: 14,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#EEE',
+  },
+  cancelBtnText: {
+    color: '#666',
+    fontSize: 16,
+    fontWeight: '700',
   },
   // Picker Styles
   pickerOverlay: {
