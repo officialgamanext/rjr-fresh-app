@@ -323,6 +323,13 @@ export default function OrdersScreen() {
                   <View style={styles.financialRow}><Text style={styles.balanceLabel}>Balance Due</Text><Text style={[styles.balanceValue, { color: (parseFloat(selectedOrder?.balance || 0)) > 0 ? '#FF5252' : '#4CAF50' }]}>₹{(parseFloat(selectedOrder?.balance || 0)).toFixed(2)}</Text></View>
                 </View>
               </View>
+
+              <TouchableOpacity 
+                style={styles.modalFooterCloseBtn}
+                onPress={() => setIsDetailModalOpen(false)}
+              >
+                <Text style={styles.modalFooterCloseText}>Close Details</Text>
+              </TouchableOpacity>
             </ScrollView>
           </View>
         </View>
@@ -408,4 +415,17 @@ const styles = StyleSheet.create({
   grandTotalValue: { fontSize: 16, color: '#4CAF50', fontWeight: '900' },
   balanceLabel: { fontSize: 18, color: '#FFF', fontWeight: '900' },
   balanceValue: { fontSize: 18, fontWeight: '900' },
+  modalFooterCloseBtn: {
+    backgroundColor: '#F1F3F5',
+    paddingVertical: 15,
+    borderRadius: 15,
+    alignItems: 'center',
+    marginTop: 20,
+    marginBottom: 20,
+  },
+  modalFooterCloseText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#666',
+  },
 });

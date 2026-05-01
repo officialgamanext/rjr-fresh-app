@@ -400,6 +400,13 @@ export default function CustomerOrdersScreen() {
                   <Text style={styles.totalValue}>₹{selectedOrder?.grandTotal}</Text>
                 </View>
               </View>
+
+              <TouchableOpacity 
+                style={styles.modalFooterCloseBtn}
+                onPress={() => setIsDetailModalOpen(false)}
+              >
+                <Text style={styles.modalFooterCloseText}>Close Details</Text>
+              </TouchableOpacity>
             </ScrollView>
           </View>
         </View>
@@ -790,5 +797,18 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '800',
     color: '#333',
+  },
+  modalFooterCloseBtn: {
+    backgroundColor: '#F1F3F5',
+    paddingVertical: 15,
+    borderRadius: 15,
+    alignItems: 'center',
+    marginTop: 10,
+    marginBottom: 30,
+  },
+  modalFooterCloseText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#666',
   },
 });

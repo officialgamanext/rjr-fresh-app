@@ -804,8 +804,16 @@ export default function MainScreen() {
             />
             <View style={styles.flyoutContent}>
               <View style={styles.flyoutHeader}>
-                <View style={styles.flyoutHandle} />
-                <Text style={styles.flyoutTitle}>Order Summary</Text>
+                <View style={styles.flyoutHeaderMain}>
+                  <View style={styles.flyoutHandle} />
+                  <Text style={styles.flyoutTitle}>Order Summary</Text>
+                </View>
+                <TouchableOpacity 
+                  style={styles.flyoutCloseBtn} 
+                  onPress={() => setIsSummaryFlyoutOpen(false)}
+                >
+                  <Ionicons name="close" size={24} color="#333" />
+                </TouchableOpacity>
               </View>
 
               <ScrollView style={styles.flyoutBody} showsVerticalScrollIndicator={false}>
@@ -1456,8 +1464,16 @@ const styles = StyleSheet.create({
     elevation: 25,
   },
   flyoutHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
+    paddingHorizontal: 20,
     paddingVertical: 15,
+  },
+  flyoutHeaderMain: {
+    alignItems: 'center',
+    flex: 1,
+    marginLeft: 40, // Offset for the close button to keep title centered
   },
   flyoutHandle: {
     width: 40,
@@ -1470,6 +1486,14 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '800',
     color: '#333',
+  },
+  flyoutCloseBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#F8F9FA',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   flyoutBody: {
     paddingHorizontal: 20,
