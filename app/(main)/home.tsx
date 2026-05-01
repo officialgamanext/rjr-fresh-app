@@ -642,50 +642,6 @@ export default function MainScreen() {
             {!currentCheckIn && <Ionicons name="lock-closed" size={14} color="#CCC" style={styles.lockIcon} />}
           </TouchableOpacity>
 
-          {/* My Orders Card */}
-          <TouchableOpacity
-            style={[styles.actionCard, !currentCheckIn && styles.disabledCard]}
-            disabled={!currentCheckIn}
-            activeOpacity={0.7}
-            onPress={() => router.push('/orders')}
-          >
-            <View style={[styles.actionIcon, { backgroundColor: '#F3E5F5' }]}>
-              <Ionicons name="receipt" size={28} color={currentCheckIn ? '#9C27B0' : '#999'} />
-            </View>
-            <Text style={[styles.actionTitle, !currentCheckIn && { color: '#999' }]}>My Sale Orders</Text>
-            {!currentCheckIn && <Ionicons name="lock-closed" size={14} color="#CCC" style={styles.lockIcon} />}
-          </TouchableOpacity>
-        </View>
-
-        <View style={[styles.actionsGrid, { marginTop: 15 }]}>
-          {/* Payments Card */}
-          <TouchableOpacity
-            style={[styles.actionCard, !currentCheckIn && styles.disabledCard]}
-            disabled={!currentCheckIn}
-            activeOpacity={0.7}
-            onPress={() => router.push('/payments')}
-          >
-            <View style={[styles.actionIcon, { backgroundColor: '#E1F5FE' }]}>
-              <Ionicons name="wallet" size={28} color={currentCheckIn ? '#03A9F4' : '#999'} />
-            </View>
-            <Text style={[styles.actionTitle, !currentCheckIn && { color: '#999' }]}>Payments</Text>
-            {!currentCheckIn && <Ionicons name="lock-closed" size={14} color="#CCC" style={styles.lockIcon} />}
-          </TouchableOpacity>
-
-          {/* My Payments Card */}
-          <TouchableOpacity
-            style={styles.actionCard}
-            activeOpacity={0.7}
-            onPress={() => router.push('/my_payments')}
-          >
-            <View style={[styles.actionIcon, { backgroundColor: '#FFF9C4' }]}>
-              <Ionicons name="receipt-outline" size={28} color="#FBC02D" />
-            </View>
-            <Text style={styles.actionTitle}>My Payments</Text>
-          </TouchableOpacity>
-        </View>
-
-        <View style={[styles.actionsGrid, { marginTop: 15 }]}>
           {/* Return Orders Card */}
           <TouchableOpacity
             style={[styles.actionCard, !currentCheckIn && styles.disabledCard]}
@@ -699,7 +655,39 @@ export default function MainScreen() {
             <Text style={[styles.actionTitle, !currentCheckIn && { color: '#999' }]}>Return Orders</Text>
             {!currentCheckIn && <Ionicons name="lock-closed" size={14} color="#CCC" style={styles.lockIcon} />}
           </TouchableOpacity>
+        </View>
 
+        <View style={[styles.actionsGrid, { marginTop: 15 }]}>
+          {/* My Sale Orders Card */}
+          <TouchableOpacity
+            style={[styles.actionCard, !currentCheckIn && styles.disabledCard]}
+            disabled={!currentCheckIn}
+            activeOpacity={0.7}
+            onPress={() => router.push('/orders')}
+          >
+            <View style={[styles.actionIcon, { backgroundColor: '#F3E5F5' }]}>
+              <Ionicons name="receipt" size={28} color={currentCheckIn ? '#9C27B0' : '#999'} />
+            </View>
+            <Text style={[styles.actionTitle, !currentCheckIn && { color: '#999' }]}>My Sale Orders</Text>
+            {!currentCheckIn && <Ionicons name="lock-closed" size={14} color="#CCC" style={styles.lockIcon} />}
+          </TouchableOpacity>
+
+          {/* Payments Card */}
+          <TouchableOpacity
+            style={[styles.actionCard, !currentCheckIn && styles.disabledCard]}
+            disabled={!currentCheckIn}
+            activeOpacity={0.7}
+            onPress={() => router.push('/payments')}
+          >
+            <View style={[styles.actionIcon, { backgroundColor: '#E1F5FE' }]}>
+              <Ionicons name="wallet" size={28} color={currentCheckIn ? '#03A9F4' : '#999'} />
+            </View>
+            <Text style={[styles.actionTitle, !currentCheckIn && { color: '#999' }]}>Payments</Text>
+            {!currentCheckIn && <Ionicons name="lock-closed" size={14} color="#CCC" style={styles.lockIcon} />}
+          </TouchableOpacity>
+        </View>
+
+        <View style={[styles.actionsGrid, { marginTop: 15 }]}>
           {/* Customer Orders Card */}
           <TouchableOpacity
             style={styles.actionCard}
@@ -710,6 +698,18 @@ export default function MainScreen() {
               <Ionicons name="people" size={28} color="#4CAF50" />
             </View>
             <Text style={styles.actionTitle}>Customer Orders</Text>
+          </TouchableOpacity>
+
+          {/* My Payments Card */}
+          <TouchableOpacity
+            style={styles.actionCard}
+            activeOpacity={0.7}
+            onPress={() => router.push('/my_payments')}
+          >
+            <View style={[styles.actionIcon, { backgroundColor: '#FFF9C4' }]}>
+              <Ionicons name="receipt-outline" size={28} color="#FBC02D" />
+            </View>
+            <Text style={styles.actionTitle}>My Payments</Text>
           </TouchableOpacity>
         </View>
 
@@ -726,7 +726,7 @@ export default function MainScreen() {
             <Text style={styles.actionTitle}>Metrics</Text>
           </TouchableOpacity>
 
-          {/* Spacer to keep grid alignment */}
+          {/* Spacer for alignment */}
           <View style={[styles.actionCard, { backgroundColor: 'transparent', elevation: 0, shadowOpacity: 0 }]} />
         </View>
       </ScrollView>
