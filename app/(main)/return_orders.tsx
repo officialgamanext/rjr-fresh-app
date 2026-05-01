@@ -45,6 +45,7 @@ export default function ReturnOrdersScreen() {
 
   // Add Return State
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [autoSelecting, setAutoSelecting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [locations, setLocations] = useState<any[]>([]);
   const [shops, setShops] = useState<any[]>([]);
@@ -120,6 +121,7 @@ export default function ReturnOrdersScreen() {
       setSelectedShop(null);
       setSelectedOrder(null);
       setReturnItems({});
+      setAutoSelecting(true);
       fetchLocations();
       checkCheckInStatus();
     }
@@ -170,6 +172,8 @@ export default function ReturnOrdersScreen() {
       }
     } catch (err) {
       console.error('ReturnOrders: Error checking check-in status:', err);
+    } finally {
+      setAutoSelecting(false);
     }
   };
 
@@ -196,10 +200,18 @@ export default function ReturnOrdersScreen() {
     setSelectedOrder(null);
     setLoadingOrders(true);
     try {
-      const q = query(collection(db, 'orders'), where('shopId', '==', shop.id), limit(15));
+      const q = query(
+        collection(db, 'orders'), 
+        where('shopId', '==', shop.id), 
+        limit(30)
+      );
       const snap = await getDocs(q);
       const allOrders = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      allOrders.sort((a,b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      allOrders.sort((a: any, b: any) => {
+        const dateA = a.timestamp?.seconds ? a.timestamp.seconds * 1000 : new Date(a.createdAt || 0).getTime();
+        const dateB = b.timestamp?.seconds ? b.timestamp.seconds * 1000 : new Date(b.createdAt || 0).getTime();
+        return dateB - dateA;
+      });
       setRecentOrders(allOrders);
     } catch (e) { console.error(e); } finally { setLoadingOrders(false); }
   };
@@ -208,12 +220,13 @@ export default function ReturnOrdersScreen() {
     setSelectedOrder(order);
     const initial: any = {};
     order.items.forEach((item: any) => {
+      const availableQty = (item.quantity || 0) - (item.returnedQty || 0);
       initial[item.itemId] = {
         returnQty: 0,
         batchNumber: item.batchNumber || '',
         price: item.price,
         itemName: item.itemName || item.name,
-        maxQty: item.quantity
+        maxQty: availableQty
       };
     });
     setReturnItems(initial);
@@ -238,9 +251,9 @@ export default function ReturnOrdersScreen() {
     try {
       const batch = writeBatch(db);
       
-      // 1. Prepare returned items list and update order items
+      // 1. Prepare returned items list and update order items with returnedQty
       const returnedItemsList: any[] = [];
-      const newOrderItems = selectedOrder.items.map((item: any) => {
+      const updatedOrderItems = selectedOrder.items.map((item: any) => {
         const ret = returnItems[item.itemId];
         if (ret && ret.returnQty > 0) {
           returnedItemsList.push({
@@ -253,15 +266,18 @@ export default function ReturnOrdersScreen() {
           });
           return {
             ...item,
-            quantity: item.quantity - ret.returnQty,
-            subtotal: (item.quantity - ret.returnQty) * item.price
+            returnedQty: (item.returnedQty || 0) + ret.returnQty
           };
         }
         return item;
       });
 
-      const newSubtotal = newOrderItems.reduce((acc: number, i: any) => acc + i.subtotal, 0);
-      const newGrandTotal = Math.max(0, newSubtotal - (selectedOrder.discount || 0));
+      const newReturnAmount = (parseFloat(selectedOrder.returnAmount || 0)) + refund;
+      const fixedSubtotal = parseFloat(selectedOrder.totalSubtotal || 0);
+      const discount = parseFloat(selectedOrder.discount || 0);
+      const creditsUsed = parseFloat(selectedOrder.creditsUsed || 0);
+      
+      const newGrandTotal = Math.max(0, fixedSubtotal - discount - creditsUsed - newReturnAmount);
       
       let creditToAdd = 0;
       let newPayStatus = selectedOrder.paymentStatus;
@@ -278,11 +294,12 @@ export default function ReturnOrdersScreen() {
         }
       }
 
-      // 2. Update Order
+      // 2. Update Order (Keep Subtotal Fixed)
       batch.update(doc(db, 'orders', selectedOrder.id), {
-        items: newOrderItems,
-        totalSubtotal: newSubtotal,
+        items: updatedOrderItems,
+        returnAmount: newReturnAmount,
         grandTotal: newGrandTotal,
+        balance: Math.max(0, newGrandTotal - (selectedOrder.paymentReceived || 0)),
         paymentStatus: newPayStatus,
         updatedAt: new Date().toISOString()
       });
@@ -421,9 +438,17 @@ export default function ReturnOrdersScreen() {
             <View style={{ width: 28 }} />
           </View>
 
-          <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
-            {/* Shop Selection */}
-            {!selectedShop ? (
+          <ScrollView 
+            style={styles.modalBody} 
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
+            {autoSelecting ? (
+              <View style={styles.centerLoader}>
+                <ActivityIndicator size="large" color="#4CAF50" />
+                <Text style={styles.loaderText}>Verifying check-in status...</Text>
+              </View>
+            ) : !selectedShop ? (
               <View style={styles.selectionSection}>
                 <Text style={styles.sectionLabel}>1. Select Shop Location</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 15 }}>
@@ -480,16 +505,28 @@ export default function ReturnOrdersScreen() {
                   <ActivityIndicator color="#4CAF50" style={{ margin: 20 }} />
                 ) : (
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 20 }}>
-                    {recentOrders.map(o => (
-                      <TouchableOpacity 
-                        key={o.id} 
-                        style={[styles.orderChip, selectedOrder?.id === o.id && styles.activeOrderChip]}
-                        onPress={() => handleOrderSelect(o)}
-                      >
-                        <Text style={[styles.orderChipText, selectedOrder?.id === o.id && styles.activeOrderChipText]}>#{o.id.slice(-6).toUpperCase()}</Text>
-                        <Text style={[styles.orderChipDate, selectedOrder?.id === o.id && styles.activeOrderChipText]}>{new Date(o.createdAt).toLocaleDateString()}</Text>
-                      </TouchableOpacity>
-                    ))}
+                    {recentOrders.length > 0 ? (
+                      recentOrders.map(o => (
+                        <TouchableOpacity 
+                          key={o.id} 
+                          style={[styles.orderChipMedium, selectedOrder?.id === o.id && styles.activeOrderChipMedium]}
+                          onPress={() => handleOrderSelect(o)}
+                        >
+                          <View style={styles.orderChipHeader}>
+                            <Text style={[styles.orderChipId, selectedOrder?.id === o.id && styles.activeOrderChipText]} numberOfLines={1}>#{o.id.slice(-6).toUpperCase()}</Text>
+                            <Text style={[styles.orderChipPriceSmall, selectedOrder?.id === o.id && styles.activeOrderChipText]}>₹{o.grandTotal || o.totalSubtotal || 0}</Text>
+                          </View>
+                          <Text style={[styles.orderChipDate, selectedOrder?.id === o.id && styles.activeOrderChipText]}>{new Date(o.createdAt).toLocaleDateString()}</Text>
+                          <View style={[styles.statusBadgeLarge, o.paymentStatus === 'Paid' ? styles.statusPaid : (o.paymentStatus === 'Partial' ? styles.statusPartial : styles.statusUnpaid)]}>
+                            <Text style={styles.statusBadgeTextLarge}>{o.paymentStatus || 'Unpaid'}</Text>
+                          </View>
+                        </TouchableOpacity>
+                      ))
+                    ) : (
+                      <View style={styles.emptyRecentOrdersSmall}>
+                        <Text style={styles.hintTextSmall}>No recent orders.</Text>
+                      </View>
+                    )}
                   </ScrollView>
                 )}
               </View>
@@ -505,14 +542,34 @@ export default function ReturnOrdersScreen() {
                       <Text style={styles.itemName}>{item.itemName || item.name}</Text>
                       <Text style={styles.itemMeta}>Max Qty: {item.quantity} | ₹{item.price}</Text>
                     </View>
-                    <View style={styles.qtyInputRow}>
+                    <View style={styles.qtyControlRow}>
+                      <TouchableOpacity 
+                        style={styles.qtyBtnSmall}
+                        onPress={() => {
+                          const curQty = returnItems[item.itemId]?.returnQty || 0;
+                          if (curQty > 0) handleQtyChange(item.itemId, (curQty - 1).toString());
+                        }}
+                      >
+                        <Ionicons name="remove" size={16} color="#666" />
+                      </TouchableOpacity>
+                      
                       <TextInput
                         style={styles.qtyInput}
                         keyboardType="numeric"
                         placeholder="0"
-                        value={returnItems[item.itemId]?.returnQty.toString()}
+                        value={returnItems[item.itemId]?.returnQty.toString() || '0'}
                         onChangeText={(val) => handleQtyChange(item.itemId, val)}
                       />
+
+                      <TouchableOpacity 
+                        style={styles.qtyBtnSmall}
+                        onPress={() => {
+                          const curQty = returnItems[item.itemId]?.returnQty || 0;
+                          handleQtyChange(item.itemId, (curQty + 1).toString());
+                        }}
+                      >
+                        <Ionicons name="add" size={16} color="#4CAF50" />
+                      </TouchableOpacity>
                     </View>
                   </View>
                 ))}
@@ -621,17 +678,40 @@ const styles = StyleSheet.create({
   locationLabel: { fontSize: 12, color: '#666', fontWeight: '600' },
   changeBtnText: { color: '#4CAF50', fontWeight: '800', fontSize: 12 },
   orderSection: { marginTop: 10 },
-  orderChip: { padding: 12, borderRadius: 15, backgroundColor: '#F0F0F0', marginRight: 10, alignItems: 'center', borderWidth: 1, borderColor: '#DDD' },
-  activeOrderChip: { backgroundColor: '#E8F5E9', borderColor: '#4CAF50' },
-  orderChipText: { fontSize: 14, fontWeight: '800', color: '#333' },
-  orderChipDate: { fontSize: 10, color: '#666', marginTop: 2 },
-  activeOrderChipText: { color: '#4CAF50' },
-  itemsSection: { marginTop: 20, paddingBottom: 50 },
-  returnItemRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
+  orderChipMedium: { 
+    padding: 15, 
+    borderRadius: 18, 
+    backgroundColor: '#fff', 
+    marginRight: 12, 
+    alignItems: 'flex-start', 
+    borderWidth: 1, 
+    borderColor: '#EEE', 
+    width: 160,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 5
+  },
+  activeOrderChipMedium: { backgroundColor: '#E8F5E9', borderColor: '#4CAF50' },
+  orderChipHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%', marginBottom: 6 },
+  orderChipId: { fontSize: 13, fontWeight: '800', color: '#333' },
+  orderChipPriceSmall: { fontSize: 12, fontWeight: '700', color: '#666' },
+  activeOrderChipText: { color: '#2E7D32' },
+  statusBadgeLarge: { width: '100%', paddingVertical: 4, borderRadius: 8, alignItems: 'center', marginTop: 8, backgroundColor: '#999' },
+  statusPaid: { backgroundColor: '#4CAF50' },
+  statusPartial: { backgroundColor: '#FF9800' },
+  statusUnpaid: { backgroundColor: '#F44336' },
+  statusBadgeTextLarge: { fontSize: 11, fontWeight: '900', color: '#fff', textTransform: 'uppercase', letterSpacing: 0.5 },
+  orderChipDate: { fontSize: 11, color: '#999', marginBottom: 2 },
+  emptyRecentOrdersSmall: { padding: 15, backgroundColor: '#F8F9FA', borderRadius: 15, borderStyle: 'dashed', borderWidth: 1, borderColor: '#DDD' },
+  itemsSection: { marginTop: 20, paddingBottom: 80 },
+  returnItemRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
   itemName: { fontSize: 15, fontWeight: '700', color: '#333', marginBottom: 2 },
   itemMeta: { fontSize: 12, color: '#999' },
-  qtyInputRow: { width: 60 },
-  qtyInput: { backgroundColor: '#F1F3F5', borderRadius: 10, height: 40, textAlign: 'center', fontSize: 16, fontWeight: '800', color: '#333', borderWidth: 1, borderColor: '#E9ECEF' },
+  qtyControlRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  qtyBtnSmall: { width: 38, height: 38, backgroundColor: '#F8F9FA', borderRadius: 10, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#EEE' },
+  qtyInput: { backgroundColor: '#F1F3F5', borderRadius: 10, height: 40, width: 55, textAlign: 'center', fontSize: 16, fontWeight: '800', color: '#333', borderWidth: 1, borderColor: '#E9ECEF' },
   refundSummary: { marginTop: 25, backgroundColor: '#F8F9FA', padding: 20, borderRadius: 20, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderWidth: 1, borderColor: '#EEE' },
   refundSumLabel: { fontSize: 14, fontWeight: '700', color: '#666' },
   refundSumValue: { fontSize: 24, fontWeight: '900', color: '#4CAF50' },
@@ -641,6 +721,8 @@ const styles = StyleSheet.create({
   processBtn: { backgroundColor: '#4CAF50', padding: 16, borderRadius: 15, alignItems: 'center', elevation: 3 },
   disabledBtn: { backgroundColor: '#CCC', elevation: 0 },
   processBtnText: { color: '#fff', fontSize: 16, fontWeight: '800' },
+  centerLoader: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 40 },
+  loaderText: { marginTop: 10, color: '#666', fontSize: 14 },
   // Detail Overlay
   detailOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 },
   detailContent: { backgroundColor: '#fff', borderRadius: 25, padding: 20, maxHeight: '80%' },

@@ -62,6 +62,7 @@ export default function MainScreen() {
   const [loadingPrices, setLoadingPrices] = useState(false);
   const [savingOrder, setSavingOrder] = useState(false);
   const [discount, setDiscount] = useState('0');
+  const [returnAmount, setReturnAmount] = useState('0');
   const [receivedAmount, setReceivedAmount] = useState('0');
   const [paymentMethod, setPaymentMethod] = useState('Cash');
   const [useCredit, setUseCredit] = useState(false);
@@ -349,6 +350,7 @@ export default function MainScreen() {
       setCart({}); // Reset cart
       setOrderItems([]);
       setDiscount('0');
+      setReturnAmount('0');
       setReceivedAmount('0');
       setPaymentMethod('Cash');
       setUseCredit(false);
@@ -405,9 +407,12 @@ export default function MainScreen() {
       const customOrderId = `${DD}${MM}${YY}${HH}${mm}${SS}`;
 
       const subtotalAfterDiscount = total - (parseFloat(discount) || 0);
+      const retAmount = parseFloat(returnAmount) || 0;
+      const amountToPay = Math.max(0, subtotalAfterDiscount - retAmount);
+      
       const availCredit = shopDetails?.credits || shopDetails?.outstandingBalance || shopDetails?.creditBalance || shopDetails?.availableCredit || shopDetails?.creditLimit || 0;
-      const creditToApply = useCredit ? Math.min(availCredit, subtotalAfterDiscount) : 0;
-      const grandTotal = Math.max(0, subtotalAfterDiscount - creditToApply);
+      const creditToApply = useCredit ? Math.min(availCredit, amountToPay) : 0;
+      const grandTotal = Math.max(0, amountToPay - creditToApply);
       const received = parseFloat(receivedAmount) || 0;
       const balance = Math.max(0, grandTotal - received);
 
@@ -419,6 +424,7 @@ export default function MainScreen() {
         items: orderItems,
         totalSubtotal: total,
         discount: parseFloat(discount) || 0,
+        returnAmount: parseFloat(returnAmount) || 0,
         creditsUsed: creditToApply,
         grandTotal: grandTotal,
         paymentReceived: received,
@@ -479,6 +485,7 @@ export default function MainScreen() {
       setCart({});
       setOrderItems([]);
       setDiscount('0');
+      setReturnAmount('0');
       setReceivedAmount('0');
     } catch (error) {
       console.error('Error saving order:', error);
@@ -839,10 +846,21 @@ export default function MainScreen() {
                   />
                 </View>
 
+                <View style={styles.inputSection}>
+                  <Text style={styles.summaryLabelText}>Return Amount (₹)</Text>
+                  <TextInput
+                    style={styles.summaryInput}
+                    keyboardType="numeric"
+                    value={returnAmount}
+                    onChangeText={setReturnAmount}
+                    placeholder="0"
+                  />
+                </View>
+
                 <View style={styles.summaryRow}>
                   <Text style={styles.grandTotalLabelText}>Grand Total</Text>
                   <Text style={styles.grandTotalValueText}>
-                    ₹{Math.max(0, calculateTotal() - (parseFloat(discount) || 0) - (useCredit ? Math.min(shopDetails?.credits || shopDetails?.outstandingBalance || shopDetails?.creditBalance || shopDetails?.availableCredit || shopDetails?.creditLimit || 0, calculateTotal() - (parseFloat(discount) || 0)) : 0))}
+                    ₹{Math.max(0, (calculateTotal() - (parseFloat(discount) || 0) - (parseFloat(returnAmount) || 0)) - (useCredit ? Math.min(shopDetails?.credits || shopDetails?.outstandingBalance || shopDetails?.creditBalance || shopDetails?.availableCredit || shopDetails?.creditLimit || 0, calculateTotal() - (parseFloat(discount) || 0) - (parseFloat(returnAmount) || 0)) : 0))}
                   </Text>
                 </View>
 
@@ -889,15 +907,15 @@ export default function MainScreen() {
 
                 <View style={styles.summaryRow}>
                   <Text style={styles.balanceLabelText}>Balance Due</Text>
-                  <Text style={[styles.balanceValueText, (calculateTotal() - (parseFloat(discount) || 0) - (useCredit ? Math.min(shopDetails?.credits || shopDetails?.outstandingBalance || shopDetails?.creditBalance || shopDetails?.availableCredit || shopDetails?.creditLimit || 0, calculateTotal() - (parseFloat(discount) || 0)) : 0) - (parseFloat(receivedAmount) || 0)) > 0 ? { color: '#FF5252' } : { color: '#4CAF50' }]}>
-                    ₹{Math.max(0, calculateTotal() - (parseFloat(discount) || 0) - (useCredit ? Math.min(shopDetails?.credits || shopDetails?.outstandingBalance || shopDetails?.creditBalance || shopDetails?.availableCredit || shopDetails?.creditLimit || 0, calculateTotal() - (parseFloat(discount) || 0)) : 0) - (parseFloat(receivedAmount) || 0))}
+                  <Text style={[styles.balanceValueText, (Math.max(0, (calculateTotal() - (parseFloat(discount) || 0) - (parseFloat(returnAmount) || 0)) - (useCredit ? Math.min(shopDetails?.credits || shopDetails?.outstandingBalance || shopDetails?.creditBalance || shopDetails?.availableCredit || shopDetails?.creditLimit || 0, calculateTotal() - (parseFloat(discount) || 0) - (parseFloat(returnAmount) || 0)) : 0)) - (parseFloat(receivedAmount) || 0)) > 0 ? { color: '#FF5252' } : { color: '#4CAF50' }]}>
+                    ₹{Math.max(0, (Math.max(0, (calculateTotal() - (parseFloat(discount) || 0) - (parseFloat(returnAmount) || 0)) - (useCredit ? Math.min(shopDetails?.credits || shopDetails?.outstandingBalance || shopDetails?.creditBalance || shopDetails?.availableCredit || shopDetails?.creditLimit || 0, calculateTotal() - (parseFloat(discount) || 0) - (parseFloat(returnAmount) || 0)) : 0))) - (parseFloat(receivedAmount) || 0))}
                   </Text>
                 </View>
 
                 <View style={styles.paymentMethodSection}>
                   <Text style={styles.sectionSmallTitle}>Order Status</Text>
                   <View style={styles.methodGrid}>
-                    {['Ordered', 'Shipped', 'Delivered'].map((status) => (
+                    {['Ordered', 'Shipped', 'Delivered', 'Completed', 'Cancelled'].map((status) => (
                       <TouchableOpacity
                         key={status}
                         style={[styles.methodBtn, orderStatus === status && styles.activeMethodBtn]}

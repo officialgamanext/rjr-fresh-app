@@ -397,7 +397,15 @@ export default function CustomerOrdersScreen() {
                   </View>
                 ))}
                 <View style={styles.totalRow}>
-                  <Text style={styles.totalLabel}>Total Amount</Text>
+                  <Text style={styles.totalLabel}>Discount</Text>
+                  <Text style={[styles.totalValue, { fontSize: 16, color: '#FF5252' }]}>-₹{selectedOrder?.discount || 0}</Text>
+                </View>
+                <View style={[styles.totalRow, { marginTop: 0, paddingTop: 10, borderTopWidth: 0 }]}>
+                  <Text style={styles.totalLabel}>Return Amount</Text>
+                  <Text style={[styles.totalValue, { fontSize: 16, color: '#FF5252' }]}>-₹{selectedOrder?.returnAmount || 0}</Text>
+                </View>
+                <View style={styles.totalRow}>
+                  <Text style={styles.totalLabel}>Grand Total</Text>
                   <Text style={styles.totalValue}>₹{selectedOrder?.grandTotal}</Text>
                 </View>
               </View>

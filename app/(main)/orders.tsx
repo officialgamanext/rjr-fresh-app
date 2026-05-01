@@ -315,6 +315,7 @@ export default function OrdersScreen() {
                 <View style={styles.financialCard}>
                   <View style={styles.financialRow}><Text style={styles.financialLabel}>Subtotal</Text><Text style={styles.financialValue}>₹{(parseFloat(selectedOrder?.totalSubtotal || 0) || (selectedOrder?.items?.reduce((acc: number, item: any) => acc + calculateItemSubtotal(item), 0)) || 0).toFixed(2)}</Text></View>
                   <View style={styles.financialRow}><Text style={styles.financialLabel}>Discount</Text><Text style={[styles.financialValue, { color: '#FF5252' }]}>-₹{(parseFloat(selectedOrder?.discount || 0)).toFixed(2)}</Text></View>
+                  <View style={styles.financialRow}><Text style={styles.financialLabel}>Return Amount</Text><Text style={[styles.financialValue, { color: '#FF5252' }]}>-₹{(parseFloat(selectedOrder?.returnAmount || 0)).toFixed(2)}</Text></View>
                   <View style={styles.financialRow}><Text style={styles.financialLabel}>Credits Used</Text><Text style={[styles.financialValue, { color: '#4CAF50' }]}>-₹{(parseFloat(selectedOrder?.creditsUsed || 0)).toFixed(2)}</Text></View>
                   <View style={styles.financialDivider} />
                   <View style={styles.financialRow}><Text style={styles.grandTotalLabel}>Grand Total</Text><Text style={styles.grandTotalValue}>₹{(parseFloat(selectedOrder?.grandTotal || 0)).toFixed(2)}</Text></View>
