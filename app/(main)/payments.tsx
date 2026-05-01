@@ -69,7 +69,11 @@ export default function PaymentsScreen() {
           return;
         }
 
-        const checkInData = { id: snap.docs[0].id, ...snap.docs[0].data() };
+        // Sort by timestamp descending to get the LATEST active check-in
+        const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        docs.sort((a: any, b: any) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
+
+        const checkInData = docs[0];
         setCurrentCheckIn(checkInData);
 
         // Fetch fresh shop details
@@ -149,8 +153,16 @@ export default function PaymentsScreen() {
 
   // Handle Amount Change -> Auto-select orders
   const handleAmountChange = (val: string) => {
-    setAmount(val);
-    const numVal = parseFloat(val) || 0;
+    let numVal = parseFloat(val) || 0;
+    
+    // Cap at total due
+    if (numVal > shopTotals.totalDue) {
+      numVal = shopTotals.totalDue;
+    }
+    
+    const finalVal = numVal.toString();
+    setAmount(finalVal);
+    
     let remaining = numVal;
     const newSelected = new Set<string>();
 

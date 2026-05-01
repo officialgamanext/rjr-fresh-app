@@ -20,7 +20,7 @@ import { useAuth } from '../../context/AuthContext';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { db } from '../../config/firebase';
-import { collection, getDocs, addDoc, serverTimestamp, query, where, orderBy, setDoc, doc, getDoc, updateDoc, increment, limit } from 'firebase/firestore';
+import { collection, getDocs, addDoc, serverTimestamp, query, where, orderBy, setDoc, doc, getDoc, updateDoc, increment, limit, writeBatch } from 'firebase/firestore';
 import * as Location from 'expo-location';
 
 const { width } = Dimensions.get('window');
@@ -247,6 +247,21 @@ export default function MainScreen() {
       let finalEmployee = employee;
 
       // Double check: if employee is still null, try fetching one last time
+      // Deactivate any existing active check-ins for this user today
+      const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      const activeQ = query(
+        collection(db, 'checkins'),
+        where('userId', '==', user?.uid),
+        where('date', '==', today),
+        where('status', '==', 'Active')
+      );
+      const activeSnap = await getDocs(activeQ);
+      const batch = writeBatch(db);
+      activeSnap.docs.forEach(docSnap => {
+        batch.update(docSnap.ref, { status: 'Inactive' });
+      });
+      await batch.commit();
+
       if (!finalEmployee && user?.email) {
         const username = user.email.split('@')[0].toLowerCase();
         const q = query(collection(db, 'employees'), where('username', '==', username));
@@ -657,6 +672,20 @@ export default function MainScreen() {
             {!currentCheckIn && <Ionicons name="lock-closed" size={14} color="#CCC" style={styles.lockIcon} />}
           </TouchableOpacity>
 
+          {/* My Payments Card */}
+          <TouchableOpacity
+            style={styles.actionCard}
+            activeOpacity={0.7}
+            onPress={() => router.push('/my_payments')}
+          >
+            <View style={[styles.actionIcon, { backgroundColor: '#FFF9C4' }]}>
+              <Ionicons name="receipt-outline" size={28} color="#FBC02D" />
+            </View>
+            <Text style={styles.actionTitle}>My Payments</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={[styles.actionsGrid, { marginTop: 15 }]}>
           {/* Return Orders Card */}
           <TouchableOpacity
             style={[styles.actionCard, !currentCheckIn && styles.disabledCard]}
@@ -670,9 +699,7 @@ export default function MainScreen() {
             <Text style={[styles.actionTitle, !currentCheckIn && { color: '#999' }]}>Return Orders</Text>
             {!currentCheckIn && <Ionicons name="lock-closed" size={14} color="#CCC" style={styles.lockIcon} />}
           </TouchableOpacity>
-        </View>
 
-        <View style={[styles.actionsGrid, { marginTop: 15 }]}>
           {/* Customer Orders Card */}
           <TouchableOpacity
             style={styles.actionCard}
@@ -684,7 +711,9 @@ export default function MainScreen() {
             </View>
             <Text style={styles.actionTitle}>Customer Orders</Text>
           </TouchableOpacity>
+        </View>
 
+        <View style={[styles.actionsGrid, { marginTop: 15, marginBottom: 30 }]}>
           {/* Metrics Card */}
           <TouchableOpacity
             style={styles.actionCard}
@@ -696,6 +725,9 @@ export default function MainScreen() {
             </View>
             <Text style={styles.actionTitle}>Metrics</Text>
           </TouchableOpacity>
+
+          {/* Spacer to keep grid alignment */}
+          <View style={[styles.actionCard, { backgroundColor: 'transparent', elevation: 0, shadowOpacity: 0 }]} />
         </View>
       </ScrollView>
 
@@ -900,7 +932,22 @@ export default function MainScreen() {
                     style={[styles.summaryInput, { color: '#4CAF50' }]}
                     keyboardType="numeric"
                     value={receivedAmount}
-                    onChangeText={setReceivedAmount}
+                    onChangeText={(val) => {
+                      const numVal = parseFloat(val) || 0;
+                      const subtotal = calculateTotal();
+                      const disc = parseFloat(discount) || 0;
+                      const retAmt = parseFloat(returnAmount) || 0;
+                      const amountToPay = Math.max(0, subtotal - disc - retAmt);
+                      const creditAvail = shopDetails?.credits || shopDetails?.outstandingBalance || shopDetails?.creditBalance || shopDetails?.availableCredit || shopDetails?.creditLimit || 0;
+                      const creditUsed = useCredit ? Math.min(creditAvail, amountToPay) : 0;
+                      const gTotal = Math.max(0, amountToPay - creditUsed);
+                      
+                      if (numVal > gTotal) {
+                        setReceivedAmount(gTotal.toFixed(2));
+                      } else {
+                        setReceivedAmount(val);
+                      }
+                    }}
                     placeholder="0"
                   />
                 </View>
