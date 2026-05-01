@@ -201,7 +201,8 @@ export default function MainScreen() {
       
       try {
         console.log('Home: Checking today\'s check-in status...');
-        const today = new Date().toISOString().split('T')[0];
+        const now = new Date();
+        const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
         const q = query(
           collection(db, 'checkins'),
           where('userId', '==', user.uid),
@@ -265,12 +266,13 @@ export default function MainScreen() {
         employeeName: finalEmployee?.name || 'N/A',
         employeeMobile: finalEmployee?.mobile || 'N/A',
         priceListId: shop.priceListId || '',
+        locationId: shop.locationId || '',
         userLatitude: userLocation?.latitude || 0,
         userLongitude: userLocation?.longitude || 0,
         shopLatitude: shop.latitude || 0,
         shopLongitude: shop.longitude || 0,
         distance: shop.distance || 0,
-        date: now.toISOString().split('T')[0],
+        date: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`,
         time: now.toLocaleTimeString(),
         timestamp: serverTimestamp(),
         status: 'Active',
@@ -1717,6 +1719,24 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
   },
+  orderItemCard: { backgroundColor: '#fff', borderRadius: 15, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: '#F0F0F0' },
+  itemMainRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  orderItemInfo: { flex: 1 },
+  orderItemName: { fontSize: 15, fontWeight: '700', color: '#333' },
+  orderItemPrice: { fontSize: 12, color: '#666', marginTop: 2 },
+  itemQuantityContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F8F9FA', borderRadius: 10, padding: 4 },
+  quantityBtn: { width: 30, height: 30, justifyContent: 'center', alignItems: 'center' },
+  quantityText: { fontSize: 14, fontWeight: '800', color: '#333', paddingHorizontal: 10 },
+  itemBatchRow: { flexDirection: 'row', alignItems: 'center', marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#F8F9FA' },
+  batchLabel: { fontSize: 12, color: '#666', marginRight: 4, fontWeight: '600' },
+  batchValueBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#F0F0F0', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
+  batchValueText: { fontSize: 12, color: '#333', fontWeight: '700' },
+  centerLoader: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 40 },
+  loaderText: { marginTop: 10, color: '#666', fontSize: 14 },
+  orderListContent: { padding: 20 },
+  emptyItems: { flex: 1, justifyContent: 'center', alignItems: 'center', marginTop: 60 },
+  emptyItemsText: { marginTop: 10, color: '#999', fontSize: 15 },
+  disabledSaveBtn: { backgroundColor: '#CCC' },
   // Picker Styles
   pickerOverlay: {
     flex: 1,

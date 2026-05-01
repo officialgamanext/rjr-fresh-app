@@ -18,6 +18,7 @@ import { db } from '../../config/firebase';
 import { useAuth } from '../../context/AuthContext';
 import { collection, query, where, getDocs, updateDoc, doc } from 'firebase/firestore';
 
+type FilterType = 'today' | 'yesterday' | 'this_week' | 'last_week' | 'this_month' | 'last_month' | 'all';
 type StatusFilter = 'All' | 'Ordered' | 'Shipped' | 'Delivered';
 type PaymentFilter = 'All' | 'Paid' | 'Unpaid';
 
@@ -597,6 +598,15 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '700',
     color: '#666',
+  },
+  itemCountText: {
+    fontSize: 12,
+    color: '#999',
+    marginTop: 2,
+  },
+  filterList: {
+    paddingHorizontal: 20,
+    paddingBottom: 5,
   },
   centerContent: {
     flex: 1,

@@ -54,6 +54,7 @@ export default function ReturnOrdersScreen() {
   const [loadingOrders, setLoadingOrders] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<any>(null);
   const [returnItems, setReturnItems] = useState<any>({}); // { itemId: { returnQty: 0, batchNumber: '' } }
+  const [activeCheckInId, setActiveCheckInId] = useState<string | null>(null);
 
   // 1. Fetch Return History
   useEffect(() => {
@@ -115,9 +116,62 @@ export default function ReturnOrdersScreen() {
   // 2. Add Return Logic
   useEffect(() => {
     if (isAddModalOpen) {
+      setSelectedLocationId('');
+      setSelectedShop(null);
+      setSelectedOrder(null);
+      setReturnItems({});
       fetchLocations();
+      checkCheckInStatus();
     }
   }, [isAddModalOpen]);
+
+  const checkCheckInStatus = async () => {
+    if (!user?.uid) return;
+    try {
+      const now = new Date();
+      const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      const q = query(
+        collection(db, 'checkins'),
+        where('userId', '==', user.uid),
+        where('date', '==', today)
+      );
+      const snap = await getDocs(q);
+      
+      if (!snap.empty) {
+        const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        docs.sort((a: any, b: any) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
+        
+        const lastCheckIn = docs[0];
+        if (lastCheckIn.shopId) {
+          console.log('ReturnOrders: Active check-in found for shop:', lastCheckIn.shopName);
+          setActiveCheckInId(lastCheckIn.id);
+          
+          const shopRef = doc(db, 'shops', lastCheckIn.shopId);
+          const shopSnap = await getDoc(shopRef);
+          
+          if (shopSnap.exists()) {
+            const shopData = { id: shopSnap.id, ...shopSnap.data() };
+            const locationId = shopData.locationId || lastCheckIn.locationId;
+            
+            if (locationId) {
+              setSelectedLocationId(locationId);
+              const shopsQ = query(collection(db, 'shops'), where('locationId', '==', locationId));
+              const shopsSnap = await getDocs(shopsQ);
+              setShops(shopsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+            }
+            
+            handleShopSelect(shopData);
+          }
+        } else {
+          setActiveCheckInId(null);
+        }
+      } else {
+        setActiveCheckInId(null);
+      }
+    } catch (err) {
+      console.error('ReturnOrders: Error checking check-in status:', err);
+    }
+  };
 
   const fetchLocations = async () => {
     try {
@@ -267,7 +321,8 @@ export default function ReturnOrdersScreen() {
         totalRefund: refund,
         creditAdded: creditToAdd,
         createdAt: new Date().toISOString(),
-        employeeId: employeeId
+        employeeId: employeeId,
+        checkinId: activeCheckInId
       });
 
       await batch.commit();
@@ -401,11 +456,19 @@ export default function ReturnOrdersScreen() {
               <View style={styles.activeShopHeader}>
                 <View style={styles.activeShopInfo}>
                   <Ionicons name="storefront" size={24} color="#4CAF50" />
-                  <Text style={styles.activeShopName}>{selectedShop.name}</Text>
+                  <View>
+                    <Text style={styles.activeShopName}>{selectedShop.name}</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                      <Text style={styles.locationLabel}>{selectedShop.locationName || 'Linked Shop'}</Text>
+                      {activeCheckInId && <Text style={styles.linkedText}> • Active Visit</Text>}
+                    </View>
+                  </View>
                 </View>
-                <TouchableOpacity onPress={() => { setSelectedShop(null); setSelectedOrder(null); }}>
-                  <Text style={styles.changeBtnText}>Change</Text>
-                </TouchableOpacity>
+                {!activeCheckInId && (
+                  <TouchableOpacity onPress={() => { setSelectedShop(null); setSelectedOrder(null); }}>
+                    <Text style={styles.changeBtnText}>Change</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             )}
 
@@ -543,6 +606,7 @@ const styles = StyleSheet.create({
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, borderBottomWidth: 1, borderBottomColor: '#EEE' },
   modalTitle: { fontSize: 20, fontWeight: '900', color: '#333' },
   modalBody: { flex: 1, padding: 20 },
+  selectionSection: { marginBottom: 20 },
   sectionLabel: { fontSize: 14, fontWeight: '800', color: '#333', marginBottom: 12, textTransform: 'uppercase', letterSpacing: 0.5 },
   locChip: { paddingHorizontal: 15, paddingVertical: 8, borderRadius: 12, backgroundColor: '#F0F0F0', marginRight: 8, borderWidth: 1, borderColor: '#DDD' },
   activeLocChip: { backgroundColor: '#E8F5E9', borderColor: '#4CAF50' },
@@ -554,6 +618,7 @@ const styles = StyleSheet.create({
   activeShopHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#E8F5E9', padding: 15, borderRadius: 15, marginBottom: 20 },
   activeShopInfo: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   activeShopName: { fontSize: 16, fontWeight: '800', color: '#2E7D32' },
+  locationLabel: { fontSize: 12, color: '#666', fontWeight: '600' },
   changeBtnText: { color: '#4CAF50', fontWeight: '800', fontSize: 12 },
   orderSection: { marginTop: 10 },
   orderChip: { padding: 12, borderRadius: 15, backgroundColor: '#F0F0F0', marginRight: 10, alignItems: 'center', borderWidth: 1, borderColor: '#DDD' },
@@ -592,4 +657,5 @@ const styles = StyleSheet.create({
   detailItemName: { fontSize: 14, fontWeight: '700', color: '#333' },
   detailItemMeta: { fontSize: 11, color: '#999' },
   detailItemSub: { fontSize: 14, fontWeight: '800', color: '#333' },
+  linkedText: { fontSize: 10, color: '#2E7D32', fontWeight: '600', opacity: 0.8 },
 });
