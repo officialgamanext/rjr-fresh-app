@@ -1,90 +1,94 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import {
-  StyleSheet,
-  View,
-  Text,
-  TouchableOpacity,
-  ScrollView,
-  TextInput,
-  ActivityIndicator,
-  Alert,
-  FlatList,
-  KeyboardAvoidingView,
-  Platform,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import { db } from '../../config/firebase';
+import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 import {
   collection,
-  query,
-  where,
-  getDocs,
-  getDoc,
   doc,
-  writeBatch,
-  onSnapshot,
-  serverTimestamp,
-  addDoc,
+  getDoc,
+  getDocs,
   increment,
-  updateDoc
-} from 'firebase/firestore';
-import { useAuth } from '../../context/AuthContext';
+  onSnapshot,
+  query,
+  serverTimestamp,
+  where,
+  writeBatch
+} from "firebase/firestore";
+import React, { useEffect, useState } from "react";
+import {
+  ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { db } from "../../config/firebase";
+import { useAuth } from "../../context/AuthContext";
 
 export default function PaymentsScreen() {
   const router = useRouter();
   const { user } = useAuth();
-  
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [currentCheckIn, setCurrentCheckIn] = useState<any>(null);
   const [shopDetails, setShopDetails] = useState<any>(null);
   const [pendingOrders, setPendingOrders] = useState<any[]>([]);
-  const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
-  const [amount, setAmount] = useState('0');
+  const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(
+    new Set(),
+  );
+  const [amount, setAmount] = useState("0");
   const [shopTotals, setShopTotals] = useState({ totalPaid: 0, totalDue: 0 });
 
   // 1. Fetch current check-in and shop details
   useEffect(() => {
     const fetchContext = async () => {
       if (!user?.uid) return;
-      
+
       try {
         const now = new Date();
-        const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-        
+        const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+
         const q = query(
-          collection(db, 'checkins'),
-          where('userId', '==', user.uid),
-          where('date', '==', today),
-          where('status', '==', 'Active')
+          collection(db, "checkins"),
+          where("userId", "==", user.uid),
+          where("date", "==", today),
+          where("status", "==", "Active"),
         );
-        
+
         const snap = await getDocs(q);
         if (snap.empty) {
-          Alert.alert('No Active Check-in', 'Please check-in to a shop first to collect payments.', [
-            { text: 'OK', onPress: () => router.back() }
-          ]);
+          Alert.alert(
+            "No Active Check-in",
+            "Please check-in to a shop first to collect payments.",
+            [{ text: "OK", onPress: () => router.back() }],
+          );
           return;
         }
 
         // Sort by timestamp descending to get the LATEST active check-in
-        const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        docs.sort((a: any, b: any) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
+        const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        docs.sort(
+          (a: any, b: any) =>
+            (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0),
+        );
 
         const checkInData = docs[0];
         setCurrentCheckIn(checkInData);
 
         // Fetch fresh shop details
-        const shopRef = doc(db, 'shops', (checkInData as any).shopId);
+        const shopRef = doc(db, "shops", (checkInData as any).shopId);
         const shopSnap = await getDoc(shopRef);
         if (shopSnap.exists()) {
           setShopDetails({ id: shopSnap.id, ...shopSnap.data() });
         }
       } catch (err) {
-        console.error('Error fetching context:', err);
-        Alert.alert('Error', 'Failed to load check-in details.');
+        console.error("Error fetching context:", err);
+        Alert.alert("Error", "Failed to load check-in details.");
       }
     };
 
@@ -96,8 +100,8 @@ export default function PaymentsScreen() {
     if (!currentCheckIn?.shopId) return;
 
     const q = query(
-      collection(db, 'orders'),
-      where('shopId', '==', currentCheckIn.shopId)
+      collection(db, "orders"),
+      where("shopId", "==", currentCheckIn.shopId),
     );
 
     const unsubscribe = onSnapshot(q, (snap) => {
@@ -107,26 +111,29 @@ export default function PaymentsScreen() {
       const initialIds = new Set<string>();
 
       // Robust check for both shopId and shopID locally if needed,
-      // but Firestore query is already filtered by shopId. 
+      // but Firestore query is already filtered by shopId.
       // We'll focus on field parsing fallbacks.
-      snap.docs.forEach(docSnap => {
+      snap.docs.forEach((docSnap) => {
         const d = docSnap.data();
-        const grandTotal = parseFloat(d.grandTotal || d.total || d.totalAmount || 0);
+        const grandTotal = parseFloat(
+          d.grandTotal || d.total || d.totalAmount || 0,
+        );
         const paid = parseFloat(d.paymentReceived || d.paidAmount || 0);
-        const balanceField = d.balance !== undefined ? parseFloat(d.balance) : null;
-        
-        const due = balanceField !== null ? balanceField : (grandTotal - paid);
-        
+        const balanceField =
+          d.balance !== undefined ? parseFloat(d.balance) : null;
+
+        const due = balanceField !== null ? balanceField : grandTotal - paid;
+
         totalPaidSum += paid;
         totalDueSum += due;
 
         if (Math.abs(due) > 0.01) {
-          pending.push({ 
-            id: docSnap.id, 
-            ...d, 
+          pending.push({
+            id: docSnap.id,
+            ...d,
             pendingAmount: due,
             grandTotal,
-            paymentReceived: paid
+            paymentReceived: paid,
           });
           initialIds.add(docSnap.id);
         }
@@ -142,7 +149,7 @@ export default function PaymentsScreen() {
       setPendingOrders(pending);
       setShopTotals({ totalPaid: totalPaidSum, totalDue: totalDueSum });
       setSelectedOrderIds(initialIds);
-      
+
       const totalToPay = pending.reduce((sum, o) => sum + o.pendingAmount, 0);
       setAmount(totalToPay.toFixed(2));
       setLoading(false);
@@ -154,15 +161,15 @@ export default function PaymentsScreen() {
   // Handle Amount Change -> Auto-select orders
   const handleAmountChange = (val: string) => {
     let numVal = parseFloat(val) || 0;
-    
+
     // Cap at total due
     if (numVal > shopTotals.totalDue) {
       numVal = shopTotals.totalDue;
     }
-    
+
     const finalVal = numVal.toString();
     setAmount(finalVal);
-    
+
     let remaining = numVal;
     const newSelected = new Set<string>();
 
@@ -185,7 +192,7 @@ export default function PaymentsScreen() {
     setSelectedOrderIds(newSelected);
 
     let newAmount = 0;
-    pendingOrders.forEach(o => {
+    pendingOrders.forEach((o) => {
       if (newSelected.has(o.id)) {
         newAmount += o.pendingAmount;
       }
@@ -196,7 +203,7 @@ export default function PaymentsScreen() {
   const handleSave = async () => {
     const pAmount = parseFloat(amount);
     if (!pAmount || pAmount <= 0) {
-      Alert.alert('Invalid Amount', 'Please enter a valid payment amount.');
+      Alert.alert("Invalid Amount", "Please enter a valid payment amount.");
       return;
     }
 
@@ -206,8 +213,10 @@ export default function PaymentsScreen() {
       let remainingPayment = pAmount;
       let distributedAmount = 0;
 
-      const ordersToApply = pendingOrders.filter(o => selectedOrderIds.has(o.id));
-      
+      const ordersToApply = pendingOrders.filter((o) =>
+        selectedOrderIds.has(o.id),
+      );
+
       for (const order of ordersToApply) {
         if (remainingPayment <= 0) break;
 
@@ -216,19 +225,22 @@ export default function PaymentsScreen() {
         distributedAmount += applied;
 
         const newReceived = (parseFloat(order.paymentReceived) || 0) + applied;
-        const newBalance = Math.max(0, (parseFloat(order.grandTotal) || 0) - newReceived);
-        const newStatus = newBalance <= 0.01 ? 'Paid' : 'Partial';
+        const newBalance = Math.max(
+          0,
+          (parseFloat(order.grandTotal) || 0) - newReceived,
+        );
+        const newStatus = newBalance <= 0.01 ? "Paid" : "Partial";
 
-        batch.update(doc(db, 'orders', order.id), {
+        batch.update(doc(db, "orders", order.id), {
           paymentReceived: newReceived,
           balance: newBalance,
           paymentStatus: newStatus,
-          updatedAt: new Date().toISOString()
+          updatedAt: new Date().toISOString(),
         });
       }
 
       // Add payment record
-      const paymentRef = doc(collection(db, 'payments'));
+      const paymentRef = doc(collection(db, "payments"));
       batch.set(paymentRef, {
         shopId: currentCheckIn.shopId,
         shopName: currentCheckIn.shopName,
@@ -236,7 +248,7 @@ export default function PaymentsScreen() {
         distributedAmount: distributedAmount,
         unallocatedAmount: Math.max(0, remainingPayment),
         employeeId: user?.uid,
-        employeeName: currentCheckIn.employeeName || 'N/A',
+        employeeName: currentCheckIn.employeeName || "N/A",
         date: new Date().toISOString(),
         createdAt: new Date().toISOString(),
         timestamp: serverTimestamp(),
@@ -244,49 +256,51 @@ export default function PaymentsScreen() {
 
       // Handle overpayment (Credits)
       if (remainingPayment > 0.01) {
-        const shopRef = doc(db, 'shops', currentCheckIn.shopId);
+        const shopRef = doc(db, "shops", currentCheckIn.shopId);
         batch.update(shopRef, {
-          credits: increment(remainingPayment)
+          credits: increment(remainingPayment),
         });
 
-        const creditRef = doc(collection(db, 'creditHistory'));
+        const creditRef = doc(collection(db, "creditHistory"));
         batch.set(creditRef, {
           shopId: currentCheckIn.shopId,
           amount: remainingPayment,
-          type: 'overpayment',
+          type: "overpayment",
           description: `Overpayment from ₹${pAmount} payment collected by app`,
-          createdAt: new Date().toISOString()
+          createdAt: new Date().toISOString(),
         });
       }
 
       await batch.commit();
-      Alert.alert('Success', 'Payment collected successfully!');
+      Alert.alert("Success", "Payment collected successfully!");
       router.back();
     } catch (err) {
-      console.error('Save error:', err);
-      Alert.alert('Error', 'Failed to process payment.');
+      console.error("Save error:", err);
+      Alert.alert("Error", "Failed to process payment.");
     } finally {
       setSaving(false);
     }
   };
 
-  const renderOrderItem = ({ item, index }: { item: any, index: number }) => {
+  const renderOrderItem = ({ item, index }: { item: any; index: number }) => {
     const isSelected = selectedOrderIds.has(item.id);
-    
+
     // Preview allocation
     let currentRemaining = parseFloat(amount) || 0;
-    pendingOrders.slice(0, index).forEach(o => {
+    pendingOrders.slice(0, index).forEach((o) => {
       if (selectedOrderIds.has(o.id)) {
         currentRemaining -= o.pendingAmount;
       }
     });
-    
-    const allocation = isSelected ? Math.max(0, Math.min(item.pendingAmount, currentRemaining)) : 0;
+
+    const allocation = isSelected
+      ? Math.max(0, Math.min(item.pendingAmount, currentRemaining))
+      : 0;
     const finalReceived = (parseFloat(item.paymentReceived) || 0) + allocation;
     const isPaid = finalReceived >= (parseFloat(item.grandTotal) || 0) - 0.01;
 
     return (
-      <TouchableOpacity 
+      <TouchableOpacity
         key={item.id}
         style={[styles.orderCard, isSelected && styles.orderCardSelected]}
         onPress={() => toggleOrderSelection(item.id)}
@@ -294,27 +308,57 @@ export default function PaymentsScreen() {
       >
         <View style={styles.orderCardHeader}>
           <View style={styles.orderIdContainer}>
-            <Ionicons 
-              name={isSelected ? "checkbox" : "square-outline"} 
-              size={22} 
-              color={isSelected ? "#4CAF50" : "#94A3B8"} 
+            <Ionicons
+              name={isSelected ? "checkbox" : "square-outline"}
+              size={22}
+              color={isSelected ? "#4CAF50" : "#94A3B8"}
             />
-            <Text style={styles.orderIdText}>#{item.id.slice(-6).toUpperCase()}</Text>
+            <Text style={styles.orderIdText}>
+              #{item.id.slice(-6).toUpperCase()}
+            </Text>
           </View>
-          <Text style={styles.orderAmountText}>₹{item.pendingAmount.toFixed(2)}</Text>
+          <Text style={styles.orderAmountText}>
+            ₹{item.pendingAmount.toFixed(2)}
+          </Text>
         </View>
-        
+
         <View style={styles.orderCardFooter}>
-          <Text style={styles.orderDateText}>{new Date(item.createdAt || 0).toLocaleDateString()}</Text>
-          <View style={[
-            styles.statusBadge, 
-            { backgroundColor: isPaid ? '#DCFCE7' : (allocation > 0 ? '#FEF3C7' : '#FEE2E2') }
-          ]}>
-            <Text style={[
-              styles.statusText, 
-              { color: isPaid ? '#166534' : (allocation > 0 ? '#92400E' : '#991B1B') }
-            ]}>
-              {isPaid ? 'Will be Paid' : (allocation > 0 ? 'Partial' : 'Pending')}
+          <Text style={styles.orderDateText}>
+            {new Date(item.createdAt || 0).toLocaleDateString()}
+          </Text>
+          <View style={styles.orderCardMeta}>
+            <Text style={styles.metaLabel}>
+              Total: ₹{(item.totalSubtotal || 0).toFixed(2)}
+            </Text>
+            <Text style={styles.metaLabel}>
+              Final Amount: ₹{(item.grandTotal || 0).toFixed(2)}
+            </Text>
+          </View>
+          <View
+            style={[
+              styles.statusBadge,
+              {
+                backgroundColor: isPaid
+                  ? "#DCFCE7"
+                  : allocation > 0
+                    ? "#FEF3C7"
+                    : "#FEE2E2",
+              },
+            ]}
+          >
+            <Text
+              style={[
+                styles.statusText,
+                {
+                  color: isPaid
+                    ? "#166534"
+                    : allocation > 0
+                      ? "#92400E"
+                      : "#991B1B",
+                },
+              ]}
+            >
+              {isPaid ? "Will be Paid" : allocation > 0 ? "Partial" : "Pending"}
             </Text>
           </View>
         </View>
@@ -332,18 +376,23 @@ export default function PaymentsScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView 
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
         style={{ flex: 1 }}
       >
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+          <TouchableOpacity
+            onPress={() => router.back()}
+            style={styles.backButton}
+          >
             <Ionicons name="arrow-back" size={24} color="#333" />
           </TouchableOpacity>
           <View style={styles.headerTitleContainer}>
             <Text style={styles.headerTitle}>Collect Payment</Text>
-            <Text style={styles.headerSubtitle}>{currentCheckIn?.shopName}</Text>
+            <Text style={styles.headerSubtitle}>
+              {currentCheckIn?.shopName}
+            </Text>
           </View>
           <View style={{ width: 40 }} />
         </View>
@@ -351,13 +400,21 @@ export default function PaymentsScreen() {
         <ScrollView contentContainerStyle={styles.scrollContent}>
           {/* Shop Summary */}
           <View style={styles.summaryContainer}>
-            <View style={[styles.summaryCard, { backgroundColor: '#F0FDF4' }]}>
-              <Text style={[styles.summaryLabel, { color: '#166534' }]}>TOTAL RECEIVED</Text>
-              <Text style={[styles.summaryValue, { color: '#14532D' }]}>₹{shopTotals.totalPaid.toFixed(0)}</Text>
+            <View style={[styles.summaryCard, { backgroundColor: "#F0FDF4" }]}>
+              <Text style={[styles.summaryLabel, { color: "#166534" }]}>
+                TOTAL
+              </Text>
+              <Text style={[styles.summaryValue, { color: "#14532D" }]}>
+                ₹{shopTotals.totalPaid.toFixed(0)}
+              </Text>
             </View>
-            <View style={[styles.summaryCard, { backgroundColor: '#FEF2F2' }]}>
-              <Text style={[styles.summaryLabel, { color: '#991B1B' }]}>TOTAL DUE</Text>
-              <Text style={[styles.summaryValue, { color: '#7F1D1D' }]}>₹{shopTotals.totalDue.toFixed(0)}</Text>
+            <View style={[styles.summaryCard, { backgroundColor: "#FEF2F2" }]}>
+              <Text style={[styles.summaryLabel, { color: "#991B1B" }]}>
+                FINAL AMOUNT DUE
+              </Text>
+              <Text style={[styles.summaryValue, { color: "#7F1D1D" }]}>
+                ₹{shopTotals.totalDue.toFixed(0)}
+              </Text>
             </View>
           </View>
 
@@ -380,24 +437,38 @@ export default function PaymentsScreen() {
           <View style={styles.listSection}>
             <View style={styles.listHeader}>
               <Text style={styles.listTitle}>ALLOCATE TO ORDERS</Text>
-              <Text style={styles.pendingCount}>{pendingOrders.length} Pending</Text>
+              <Text style={styles.pendingCount}>
+                {pendingOrders.length} Pending
+              </Text>
             </View>
 
             {pendingOrders.length === 0 ? (
               <View style={styles.emptyContainer}>
-                <Ionicons name="checkmark-done-circle" size={48} color="#CBD5E1" />
-                <Text style={styles.emptyText}>No pending orders for this shop.</Text>
+                <Ionicons
+                  name="checkmark-done-circle"
+                  size={48}
+                  color="#CBD5E1"
+                />
+                <Text style={styles.emptyText}>
+                  No pending orders for this shop.
+                </Text>
               </View>
             ) : (
-              pendingOrders.map((item, index) => renderOrderItem({ item, index }))
+              pendingOrders.map((item, index) =>
+                renderOrderItem({ item, index }),
+              )
             )}
           </View>
         </ScrollView>
 
         {/* Action Button */}
         <View style={styles.footer}>
-          <TouchableOpacity 
-            style={[styles.confirmButton, (saving || !amount || parseFloat(amount) <= 0) && styles.disabledButton]}
+          <TouchableOpacity
+            style={[
+              styles.confirmButton,
+              (saving || !amount || parseFloat(amount) <= 0) &&
+                styles.disabledButton,
+            ]}
             onPress={handleSave}
             disabled={saving || !amount || parseFloat(amount) <= 0}
           >
@@ -405,7 +476,9 @@ export default function PaymentsScreen() {
               <ActivityIndicator color="#fff" />
             ) : (
               <>
-                <Text style={styles.confirmButtonText}>Confirm Payment ₹{parseFloat(amount || '0').toFixed(2)}</Text>
+                <Text style={styles.confirmButtonText}>
+                  Confirm Payment ₹{parseFloat(amount || "0").toFixed(2)}
+                </Text>
                 <Ionicons name="checkmark-circle" size={20} color="#fff" />
               </>
             )}
@@ -419,43 +492,43 @@ export default function PaymentsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: "#fff",
   },
   center: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
   },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
+    borderBottomColor: "#F1F5F9",
   },
   backButton: {
     padding: 8,
   },
   headerTitleContainer: {
     flex: 1,
-    alignItems: 'center',
+    alignItems: "center",
   },
   headerTitle: {
     fontSize: 18,
-    fontWeight: '700',
-    color: '#1E293B',
+    fontWeight: "700",
+    color: "#1E293B",
   },
   headerSubtitle: {
     fontSize: 12,
-    color: '#64748B',
+    color: "#64748B",
     marginTop: 2,
   },
   scrollContent: {
     padding: 16,
   },
   summaryContainer: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: 12,
     marginBottom: 24,
   },
@@ -464,109 +537,120 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.05)',
+    borderColor: "rgba(0,0,0,0.05)",
   },
   summaryLabel: {
     fontSize: 10,
-    fontWeight: '700',
+    fontWeight: "700",
     letterSpacing: 0.5,
     marginBottom: 4,
   },
   summaryValue: {
     fontSize: 20,
-    fontWeight: '800',
+    fontWeight: "800",
   },
   inputSection: {
     marginBottom: 24,
   },
   inputLabel: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#64748B',
+    fontWeight: "600",
+    color: "#64748B",
     marginBottom: 8,
   },
   inputWrapper: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F8FAFC',
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F8FAFC",
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: "#E2E8F0",
     paddingHorizontal: 16,
   },
   currencySymbol: {
     fontSize: 24,
-    fontWeight: '700',
-    color: '#1E293B',
+    fontWeight: "700",
+    color: "#1E293B",
     marginRight: 8,
   },
   amountInput: {
     flex: 1,
     height: 56,
     fontSize: 24,
-    fontWeight: '700',
-    color: '#1E293B',
+    fontWeight: "700",
+    color: "#1E293B",
   },
   listSection: {
     flex: 1,
   },
   listHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     marginBottom: 12,
   },
   listTitle: {
     fontSize: 12,
-    fontWeight: '700',
-    color: '#94A3B8',
+    fontWeight: "700",
+    color: "#94A3B8",
     letterSpacing: 1,
   },
   pendingCount: {
     fontSize: 12,
-    color: '#64748B',
+    color: "#64748B",
   },
   orderCard: {
-    backgroundColor: '#fff',
+    backgroundColor: "#fff",
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: '#F1F5F9',
+    borderColor: "#F1F5F9",
   },
   orderCardSelected: {
-    borderColor: '#4CAF50',
-    backgroundColor: '#F0FDF4',
+    borderColor: "#4CAF50",
+    backgroundColor: "#F0FDF4",
   },
   orderCardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     marginBottom: 8,
   },
   orderIdContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 8,
   },
   orderIdText: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#1E293B',
+    fontWeight: "600",
+    color: "#1E293B",
   },
   orderAmountText: {
     fontSize: 16,
-    fontWeight: '700',
-    color: '#1E293B',
+    fontWeight: "700",
+    color: "#1E293B",
   },
   orderCardFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 8,
+  },
+  orderCardMeta: {
+    flex: 1,
+    flexDirection: "column",
+    alignItems: "flex-start",
+  },
+  metaLabel: {
+    fontSize: 10,
+    color: "#64748B",
+    fontWeight: "500",
   },
   orderDateText: {
     fontSize: 12,
-    color: '#94A3B8',
+    color: "#94A3B8",
   },
   statusBadge: {
     paddingHorizontal: 8,
@@ -575,51 +659,51 @@ const styles = StyleSheet.create({
   },
   statusText: {
     fontSize: 11,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   emptyContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     paddingVertical: 40,
-    backgroundColor: '#F8FAFC',
+    backgroundColor: "#F8FAFC",
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
-    borderStyle: 'dashed',
+    borderColor: "#E2E8F0",
+    borderStyle: "dashed",
   },
   emptyText: {
     marginTop: 12,
-    color: '#64748B',
+    color: "#64748B",
     fontSize: 14,
   },
   footer: {
     padding: 16,
     borderTopWidth: 1,
-    borderTopColor: '#F1F5F9',
-    backgroundColor: '#fff',
+    borderTopColor: "#F1F5F9",
+    backgroundColor: "#fff",
   },
   confirmButton: {
-    backgroundColor: '#4CAF50',
+    backgroundColor: "#4CAF50",
     height: 56,
     borderRadius: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
     gap: 8,
-    shadowColor: '#4CAF50',
+    shadowColor: "#4CAF50",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.2,
     shadowRadius: 8,
     elevation: 4,
   },
   disabledButton: {
-    backgroundColor: '#CBD5E1',
+    backgroundColor: "#CBD5E1",
     shadowOpacity: 0,
     elevation: 0,
   },
   confirmButtonText: {
-    color: '#fff',
+    color: "#fff",
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: "700",
   },
 });

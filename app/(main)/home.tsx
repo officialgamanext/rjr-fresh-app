@@ -863,7 +863,7 @@ export default function MainScreen() {
                   <Text style={styles.summaryValueText}>{Object.values(cart).reduce((a, b) => a + b, 0)}</Text>
                 </View>
                 <View style={styles.summaryRow}>
-                  <Text style={styles.summaryLabelText}>Subtotal</Text>
+                  <Text style={styles.summaryLabelText}>Total</Text>
                   <Text style={styles.summaryValueText}>₹{calculateTotal()}</Text>
                 </View>
 
@@ -890,7 +890,7 @@ export default function MainScreen() {
                 </View>
 
                 <View style={styles.summaryRow}>
-                  <Text style={styles.grandTotalLabelText}>Grand Total</Text>
+                  <Text style={styles.grandTotalLabelText}>Final Amount</Text>
                   <Text style={styles.grandTotalValueText}>
                     ₹{Math.max(0, (calculateTotal() - (parseFloat(discount) || 0) - (parseFloat(returnAmount) || 0)) - (useCredit ? Math.min(shopDetails?.credits || shopDetails?.outstandingBalance || shopDetails?.creditBalance || shopDetails?.availableCredit || shopDetails?.creditLimit || 0, calculateTotal() - (parseFloat(discount) || 0) - (parseFloat(returnAmount) || 0)) : 0))}
                   </Text>
