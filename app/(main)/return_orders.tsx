@@ -13,7 +13,7 @@ import {
   Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, Feather } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { db } from '../../config/firebase';
 import { useAuth } from '../../context/AuthContext';
@@ -630,13 +630,13 @@ export default function ReturnOrdersScreen() {
                     </View>
                     <View style={styles.qtyControlRow}>
                       <TouchableOpacity 
-                        style={styles.qtyBtnSmall}
+                        style={[styles.qtyBtnSmall, { backgroundColor: (returnItems[item.itemId]?.returnQty || 0) > 0 ? '#FFEBEE' : '#F5F5F5' }]}
                         onPress={() => {
                           const curQty = returnItems[item.itemId]?.returnQty || 0;
                           if (curQty > 0) handleQtyChange(item.itemId, (curQty - 1).toString());
                         }}
                       >
-                        <Ionicons name="remove" size={16} color="#666" />
+                        <Feather name="minus" size={18} color={(returnItems[item.itemId]?.returnQty || 0) > 0 ? "#FF5252" : "#BDBDBD"} />
                       </TouchableOpacity>
                       
                       <TextInput
@@ -648,13 +648,14 @@ export default function ReturnOrdersScreen() {
                       />
 
                       <TouchableOpacity 
-                        style={styles.qtyBtnSmall}
+                        style={[styles.qtyBtnSmall, { backgroundColor: '#E8F5E9' }]}
                         onPress={() => {
                           const curQty = returnItems[item.itemId]?.returnQty || 0;
-                          handleQtyChange(item.itemId, (curQty + 1).toString());
+                          const max = (item.quantity || 0) - (item.returnedQty || 0);
+                          if (curQty < max) handleQtyChange(item.itemId, (curQty + 1).toString());
                         }}
                       >
-                        <Ionicons name="add" size={16} color="#4CAF50" />
+                        <Feather name="plus" size={18} color="#2E7D32" />
                       </TouchableOpacity>
                     </View>
                   </View>
@@ -796,7 +797,15 @@ const styles = StyleSheet.create({
   itemName: { fontSize: 15, fontWeight: '700', color: '#333', marginBottom: 2 },
   itemMeta: { fontSize: 12, color: '#999' },
   qtyControlRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  qtyBtnSmall: { width: 38, height: 38, backgroundColor: '#F8F9FA', borderRadius: 10, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#EEE' },
+  qtyBtnSmall: {
+    width: 32,
+    height: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
   qtyInput: { backgroundColor: '#F1F3F5', borderRadius: 10, height: 40, width: 55, textAlign: 'center', fontSize: 16, fontWeight: '800', color: '#333', borderWidth: 1, borderColor: '#E9ECEF' },
   refundSummary: { marginTop: 25, backgroundColor: '#F8F9FA', padding: 20, borderRadius: 20, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderWidth: 1, borderColor: '#EEE' },
   refundSumLabel: { fontSize: 14, fontWeight: '700', color: '#666' },

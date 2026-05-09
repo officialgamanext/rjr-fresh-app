@@ -707,16 +707,16 @@ export default function MainScreen() {
           <View style={styles.itemQuantityContainer}>
             <TouchableOpacity 
               onPress={() => updateQuantity(item.id, -1)}
-              style={styles.quantityBtn}
+              style={[styles.quantityBtn, { backgroundColor: quantity > 0 ? '#FFEBEE' : '#F5F5F5' }]}
             >
-              <Ionicons name="remove" size={16} color={quantity > 0 ? "#4CAF50" : "#CCC"} />
+              <Feather name="minus" size={18} color={quantity > 0 ? "#FF5252" : "#BDBDBD"} />
             </TouchableOpacity>
             <Text style={styles.quantityText}>{quantity}</Text>
             <TouchableOpacity 
               onPress={() => updateQuantity(item.id, 1)}
-              style={styles.quantityBtn}
+              style={[styles.quantityBtn, { backgroundColor: '#E8F5E9' }]}
             >
-              <Ionicons name="add" size={16} color="#4CAF50" />
+              <Feather name="plus" size={18} color="#2E7D32" />
             </TouchableOpacity>
           </View>
         </View>
@@ -1776,10 +1776,11 @@ const styles = StyleSheet.create({
     borderColor: '#E5E7EB',
   },
   quantityBtn: {
-    width: 36,
-    height: 36,
+    width: 32,
+    height: 32,
     justifyContent: 'center',
     alignItems: 'center',
+    borderRadius: 8,
   },
   quantityText: {
     fontSize: 15,
