@@ -1,60 +1,148 @@
-import React, { useState } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, ImageBackground, Dimensions, ActivityIndicator } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { StyleSheet, View, Text, TouchableOpacity, Dimensions, SafeAreaView, Image } from 'react-native';
 import { useRouter } from 'expo-router';
-import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
+import { Feather } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Animated, { 
+  FadeInDown, 
+  FadeInUp, 
+  FadeIn,
+  useSharedValue,
+  useAnimatedStyle,
+  withRepeat,
+  withTiming,
+  withSequence
+} from 'react-native-reanimated';
 
-const { width, height } = Dimensions.get('window');
+const { width } = Dimensions.get('window');
+
+// Colors from design
+const COLORS = {
+  primary: '#1B3C1A', // Dark Forest Green
+  accent: '#DC2626',  // Red for RJR
+  text: '#4B5563',    // Gray for description
+  heading: '#111827', // Darker gray for heading
+  white: '#FFFFFF',
+  gray: '#9CA3AF',
+  lightGray: '#F3F4F6',
+};
 
 export default function WelcomeScreen() {
   const router = useRouter();
-  const [loading, setLoading] = useState(false);
+  const insets = useSafeAreaInsets();
+  
+  const floatingAnim = useSharedValue(0);
+
+  useEffect(() => {
+    floatingAnim.value = withRepeat(
+      withSequence(
+        withTiming(-15, { duration: 2500 }),
+        withTiming(0, { duration: 2500 })
+      ),
+      -1,
+      true
+    );
+  }, []);
+
+  const animatedIllustrationStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: floatingAnim.value }],
+  }));
 
   const handleGetStarted = () => {
-    setLoading(true);
     router.push('/(auth)/login');
-    // We don't need to set loading back to false because we are navigating away
   };
 
   return (
     <View style={styles.container}>
-      <StatusBar style="light" />
-      <ImageBackground
-        source={{ uri: 'https://images.unsplash.com/photo-1542838132-92c53300491e?q=80&w=1000&auto=format&fit=crop' }}
-        style={styles.backgroundImage}
-      >
-        <LinearGradient
-          colors={['rgba(0,0,0,0.1)', 'rgba(0,0,0,0.8)']}
-          style={styles.gradient}
-        >
-          <View style={styles.content}>
-            <View style={styles.logoContainer}>
-              <View style={styles.logoCircle}>
-                <Text style={styles.logoText}>RJR</Text>
-              </View>
-              <Text style={styles.brandName}>Fresh</Text>
-            </View>
+      <StatusBar style="dark" />
+      
+      {/* Background Shapes - Subtle wavy design at bottom */}
+      <View style={styles.backgroundAccent} />
 
-            <View style={styles.textContainer}>
-              <Text style={styles.title}>Freshness at Your Doorstep</Text>
-              <Text style={styles.subtitle}>Experience the finest quality groceries and fresh produce delivered with care.</Text>
-            </View>
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.content}>
+          
+          {/* Logo Section */}
+          <Animated.View 
+            entering={FadeInUp.delay(200).duration(800)}
+            style={[styles.logoSection, { marginTop: insets.top > 0 ? 10 : 30 }]}
+          >
+            <Image 
+              source={require('../../assets/images/rjr_logo.png')} 
+              style={styles.logo}
+              resizeMode="contain"
+            />
+            <Text style={styles.tagline}>Delivering Freshness, Building Trust</Text>
+          </Animated.View>
 
-            <TouchableOpacity
-              style={[styles.button, loading && { opacity: 0.8 }]}
-              onPress={handleGetStarted}
-              activeOpacity={0.8}
-              disabled={loading}
+          {/* Illustration Section */}
+          <Animated.View 
+            entering={FadeIn.delay(400).duration(1000)}
+            style={styles.illustrationContainer}
+          >
+            <Animated.View style={animatedIllustrationStyle}>
+              <Image 
+                source={require('../../assets/images/welcome_illustration.png')} 
+                style={styles.illustration}
+                resizeMode="contain"
+              />
+            </Animated.View>
+          </Animated.View>
+
+          {/* Text Section */}
+          <View style={styles.textSection}>
+            <Animated.Text 
+              entering={FadeInDown.delay(600).duration(800)}
+              style={styles.welcomeTitle}
             >
-              {loading ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.buttonText}>Get Started</Text>
-              )}
-            </TouchableOpacity>
+              Welcome to{'\n'}
+              <Text style={{ color: COLORS.accent }}>RJR</Text>{' '}
+              <Text style={{ color: COLORS.primary }}>FRESH</Text> Agent App
+            </Animated.Text>
+            
+            <Animated.Text 
+              entering={FadeInDown.delay(800).duration(800)}
+              style={styles.subtitle}
+            >
+              Manage orders, track deliveries, collect payments, and grow with RJR Fresh.
+            </Animated.Text>
+
+            {/* Pagination Dots */}
+            <Animated.View 
+              entering={FadeIn.delay(1000).duration(800)}
+              style={styles.pagination}
+            >
+              <View style={[styles.dot, styles.activeDot]} />
+              <View style={styles.dot} />
+              <View style={styles.dot} />
+            </Animated.View>
           </View>
-        </LinearGradient>
-      </ImageBackground>
+
+          {/* Footer Section */}
+          <Animated.View 
+            entering={FadeInDown.delay(1200).duration(800)}
+            style={styles.footer}
+          >
+            <TouchableOpacity
+              style={styles.button}
+              onPress={handleGetStarted}
+              activeOpacity={0.9}
+            >
+              <Text style={styles.buttonText}>Get Started</Text>
+              <Feather name="arrow-right" size={24} color={COLORS.white} />
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              onPress={() => router.push('/(auth)/login')}
+              style={styles.linkButton}
+            >
+              <Text style={styles.linkText}>I already have an account</Text>
+            </TouchableOpacity>
+          </Animated.View>
+
+        </View>
+      </SafeAreaView>
     </View>
   );
 }
@@ -62,85 +150,122 @@ export default function WelcomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: COLORS.white,
   },
-  backgroundImage: {
+  safeArea: {
     flex: 1,
-    width: width,
-    height: height,
   },
-  gradient: {
-    flex: 1,
-    justifyContent: 'flex-end',
-    paddingHorizontal: 30,
-    paddingBottom: 60,
+  backgroundAccent: {
+    position: 'absolute',
+    bottom: -80,
+    left: -100,
+    right: -100,
+    height: 350,
+    backgroundColor: '#EEF2FF', // Very light indigo/blue tint
+    borderRadius: 300,
+    opacity: 0.6,
+    transform: [{ scaleX: 1.5 }],
   },
   content: {
+    flex: 1,
+    paddingHorizontal: 25,
     alignItems: 'center',
+    justifyContent: 'space-between',
   },
-  logoContainer: {
+  logoSection: {
     alignItems: 'center',
-    marginBottom: 40,
+    width: '100%',
   },
-  logoCircle: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: '#4CAF50',
+  logo: {
+    width: width * 0.6,
+    height: 70,
+  },
+  tagline: {
+    fontSize: 14,
+    color: COLORS.text,
+    marginTop: 4,
+    fontWeight: '500',
+    letterSpacing: 0.5,
+  },
+  illustrationContainer: {
+    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    elevation: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 5 },
-    shadowOpacity: 0.3,
-    shadowRadius: 10,
+    width: '100%',
   },
-  logoText: {
-    color: '#fff',
-    fontSize: 32,
-    fontWeight: '900',
-    letterSpacing: 2,
+  illustration: {
+    width: width * 0.9,
+    height: width * 0.9,
   },
-  brandName: {
-    color: '#fff',
-    fontSize: 28,
-    fontWeight: '700',
-    marginTop: 10,
-    letterSpacing: 1,
-  },
-  textContainer: {
-    marginBottom: 50,
+  textSection: {
     alignItems: 'center',
+    width: '100%',
+    marginBottom: 10,
   },
-  title: {
-    color: '#fff',
-    fontSize: 32,
-    fontWeight: '800',
+  welcomeTitle: {
+    fontSize: 30,
+    fontWeight: '900',
     textAlign: 'center',
-    lineHeight: 40,
+    color: COLORS.heading,
+    lineHeight: 38,
   },
   subtitle: {
-    color: '#E0E0E0',
     fontSize: 16,
+    color: COLORS.text,
     textAlign: 'center',
-    marginTop: 15,
+    marginTop: 12,
     lineHeight: 24,
-    paddingHorizontal: 20,
+    paddingHorizontal: 15,
+  },
+  pagination: {
+    flexDirection: 'row',
+    marginTop: 25,
+    gap: 8,
+  },
+  dot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#D1D5DB',
+  },
+  activeDot: {
+    backgroundColor: COLORS.primary,
+    width: 28,
+  },
+  footer: {
+    width: '100%',
+    paddingBottom: 25,
+    alignItems: 'center',
   },
   button: {
-    backgroundColor: '#4CAF50',
+    backgroundColor: COLORS.primary,
     width: '100%',
-    paddingVertical: 18,
-    borderRadius: 15,
+    height: 64,
+    borderRadius: 18,
+    flexDirection: 'row',
     alignItems: 'center',
-    elevation: 5,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.2,
-    shadowRadius: 5,
+    justifyContent: 'center',
+    gap: 12,
+    elevation: 8,
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
   },
   buttonText: {
-    color: '#fff',
+    color: COLORS.white,
     fontSize: 18,
     fontWeight: '700',
   },
+  linkButton: {
+    marginTop: 20,
+    paddingVertical: 10,
+  },
+  linkText: {
+    color: COLORS.primary,
+    fontSize: 16,
+    fontWeight: '700',
+  },
 });
+
+

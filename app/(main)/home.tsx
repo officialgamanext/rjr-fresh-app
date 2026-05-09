@@ -15,10 +15,11 @@ import {
   Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, Feather } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
+import { Image } from 'react-native';
 import { db } from '../../config/firebase';
 import { collection, getDocs, addDoc, serverTimestamp, query, where, orderBy, setDoc, doc, getDoc, updateDoc, increment, limit, writeBatch } from 'firebase/firestore';
 import * as Location from 'expo-location';
@@ -560,175 +561,236 @@ export default function MainScreen() {
     );
   };
 
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour < 12) return 'Good Morning';
+    if (hour < 17) return 'Good Afternoon';
+    return 'Good Evening';
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" />
 
-      {/* Header */}
-      <View style={styles.header}>
-        <View>
-          <Text style={styles.welcomeText}>Welcome back,</Text>
-          <Text style={styles.userName}>{user?.email?.split('@')[0] || 'User'}</Text>
-        </View>
-        <View style={styles.headerRight}>
-          <TouchableOpacity 
-            style={styles.profileButton} 
-            onPress={() => router.push('/profile')}
-          >
-            <Ionicons name="person-circle-outline" size={28} color="#4CAF50" />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.logoutButton} onPress={handleLogout} disabled={loggingOut}>
-            {loggingOut ? (
-              <ActivityIndicator size="small" color="#FF5252" />
-            ) : (
-              <Ionicons name="log-out-outline" size={24} color="#FF5252" />
-            )}
-          </TouchableOpacity>
-        </View>
+      {/* Top Header */}
+      <View style={styles.topHeader}>
+        <Image 
+          source={require('../../assets/images/rjr_logo.png')} 
+          style={styles.headerLogo}
+          resizeMode="contain"
+        />
+        <TouchableOpacity style={styles.notificationBtn}>
+          <Feather name="bell" size={24} color="#333" />
+          <View style={styles.notificationBadge}>
+            <Text style={styles.badgeText}>3</Text>
+          </View>
+        </TouchableOpacity>
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        
+        {/* Profile Section */}
+        <View style={styles.profileSection}>
+          <View style={styles.profileTextContainer}>
+            <Text style={styles.greetingText}>{getGreeting()}, Agent 👋</Text>
+            <Text style={styles.userNameText}>{employee?.name || user?.email?.split('@')[0] || 'Agent'}</Text>
+            
+            <TouchableOpacity style={styles.locationContainer}>
+              <Feather name="map-pin" size={16} color={COLORS.primary} />
+              <Text style={styles.locationText} numberOfLines={1}>
+                {currentCheckIn ? currentCheckIn.shopAddress : 'Hyderabad, Telangana'}
+              </Text>
+              <Feather name="chevron-down" size={16} color="#666" />
+            </TouchableOpacity>
+          </View>
+          
+          <Image 
+            source={require('../../assets/images/home_illustration.png')} 
+            style={styles.profileIllustration}
+            resizeMode="contain"
+          />
+        </View>
+
         {/* Check-In Card */}
         <TouchableOpacity
-          style={[styles.bigCard, currentCheckIn && styles.activeCheckInCard]}
+          style={styles.checkInCard}
           onPress={handleCheckInPress}
           disabled={checkingIn}
+          activeOpacity={0.9}
         >
-          <LinearGradient
-            colors={currentCheckIn ? ['#4CAF50', '#2E7D32'] : ['#fff', '#f9f9f9']}
-            style={styles.bigCardGradient}
-          >
-            <View style={styles.bigCardContent}>
-              <View style={[styles.bigIconBox, currentCheckIn && { backgroundColor: 'rgba(255,255,255,0.2)' }]}>
-                {checkingIn ? (
-                  <ActivityIndicator color={currentCheckIn ? '#fff' : '#4CAF50'} />
-                ) : (
-                  <Ionicons
-                    name={currentCheckIn ? 'checkmark-circle' : 'location'}
-                    size={32}
-                    color={currentCheckIn ? '#fff' : '#4CAF50'}
-                  />
-                )}
+          <View style={styles.checkInContent}>
+            <View style={styles.checkInIconContainer}>
+              <View style={styles.checkInIconBg}>
+                <Feather name="map-pin" size={24} color={COLORS.primary} />
               </View>
-              <View style={styles.bigCardText}>
-                <Text style={[styles.bigCardTitle, currentCheckIn && { color: '#fff' }]}>
-                  {currentCheckIn ? 'Checked In' : 'Check In'}
-                </Text>
-                <Text style={[styles.bigCardDesc, currentCheckIn && { color: 'rgba(255,255,255,0.8)' }]}>
-                  {currentCheckIn
-                    ? `Active at ${currentCheckIn.shopName}`
-                    : 'Locate and check-in to a nearby shop'}
-                </Text>
-              </View>
-              {!currentCheckIn && (
-                <Ionicons name="chevron-forward" size={24} color="#CCC" />
-              )}
             </View>
-          </LinearGradient>
+            <View style={styles.checkInTextContainer}>
+              <Text style={styles.checkInTitle}>Check In</Text>
+              <Text style={styles.checkInDesc}>
+                {currentCheckIn 
+                  ? `You are checked in at ${currentCheckIn.shopName}`
+                  : 'Let us know you\'re starting your day. Stay updated and get new orders'}
+              </Text>
+            </View>
+          </View>
+          
+          <View style={styles.checkInButton}>
+            <View style={styles.checkInButtonContent}>
+              <Feather name="maximize" size={18} color={COLORS.primary} />
+              <Text style={styles.checkInButtonText}>{currentCheckIn ? 'Checked In' : 'Check In'}</Text>
+            </View>
+          </View>
         </TouchableOpacity>
 
-        <View style={styles.actionsGrid}>
-          {/* Sale Order Card */}
-          <TouchableOpacity
-            style={[styles.actionCard, !currentCheckIn && styles.disabledCard]}
-            disabled={!currentCheckIn}
-            onPress={handleSaleOrderPress}
-            activeOpacity={0.7}
-          >
-            <View style={[styles.actionIcon, { backgroundColor: '#E3F2FD' }]}>
-              <Ionicons name="cart" size={28} color={currentCheckIn ? '#2196F3' : '#999'} />
-            </View>
-            <Text style={[styles.actionTitle, !currentCheckIn && { color: '#999' }]}>Sale Order</Text>
-            {!currentCheckIn && <Ionicons name="lock-closed" size={14} color="#CCC" style={styles.lockIcon} />}
-          </TouchableOpacity>
-
-          {/* Return Orders Card */}
-          <TouchableOpacity
-            style={[styles.actionCard, !currentCheckIn && styles.disabledCard]}
-            disabled={!currentCheckIn}
-            activeOpacity={0.7}
-            onPress={() => router.push('/return_orders')}
-          >
-            <View style={[styles.actionIcon, { backgroundColor: '#FFF3E0' }]}>
-              <Ionicons name="refresh-circle" size={28} color={currentCheckIn ? '#FF9800' : '#999'} />
-            </View>
-            <Text style={[styles.actionTitle, !currentCheckIn && { color: '#999' }]}>Return Orders</Text>
-            {!currentCheckIn && <Ionicons name="lock-closed" size={14} color="#CCC" style={styles.lockIcon} />}
-          </TouchableOpacity>
+        {/* Menu Section */}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Menu</Text>
         </View>
 
-        <View style={[styles.actionsGrid, { marginTop: 15 }]}>
-          {/* My Sale Orders Card */}
-          <TouchableOpacity
-            style={[styles.actionCard, !currentCheckIn && styles.disabledCard]}
+        <View style={styles.menuGrid}>
+          {/* Sale Order */}
+          <TouchableOpacity 
+            style={styles.menuCard}
+            onPress={handleSaleOrderPress}
             disabled={!currentCheckIn}
-            activeOpacity={0.7}
+          >
+            <View style={[styles.menuIconContainer, { backgroundColor: '#E8F5E9' }]}>
+              <Feather name="clipboard" size={22} color="#2E7D32" />
+            </View>
+            <View style={styles.menuTextContainer}>
+              <Text style={styles.menuCardTitle}>Sale Order</Text>
+              <Text style={styles.menuCardSubtitle}>Create new sale order</Text>
+            </View>
+            <Feather name="chevron-right" size={18} color="#CCC" />
+          </TouchableOpacity>
+
+          {/* My Sale Orders */}
+          <TouchableOpacity 
+            style={styles.menuCard}
             onPress={() => router.push('/orders')}
           >
-            <View style={[styles.actionIcon, { backgroundColor: '#F3E5F5' }]}>
-              <Ionicons name="receipt" size={28} color={currentCheckIn ? '#9C27B0' : '#999'} />
+            <View style={[styles.menuIconContainer, { backgroundColor: '#E3F2FD' }]}>
+              <Feather name="list" size={22} color="#1976D2" />
             </View>
-            <Text style={[styles.actionTitle, !currentCheckIn && { color: '#999' }]}>My Sale Orders</Text>
-            {!currentCheckIn && <Ionicons name="lock-closed" size={14} color="#CCC" style={styles.lockIcon} />}
+            <View style={styles.menuTextContainer}>
+              <Text style={styles.menuCardTitle}>My Sale Orders</Text>
+              <Text style={styles.menuCardSubtitle}>View and manage orders</Text>
+            </View>
+            <Feather name="chevron-right" size={18} color="#CCC" />
           </TouchableOpacity>
 
-          {/* Payments Card */}
-          <TouchableOpacity
-            style={[styles.actionCard, !currentCheckIn && styles.disabledCard]}
-            disabled={!currentCheckIn}
-            activeOpacity={0.7}
-            onPress={() => router.push('/payments')}
+          {/* Return Orders */}
+          <TouchableOpacity 
+            style={styles.menuCard}
+            onPress={() => router.push('/return_orders')}
           >
-            <View style={[styles.actionIcon, { backgroundColor: '#E1F5FE' }]}>
-              <Ionicons name="wallet" size={28} color={currentCheckIn ? '#03A9F4' : '#999'} />
+            <View style={[styles.menuIconContainer, { backgroundColor: '#FFF3E0' }]}>
+              <Feather name="rotate-ccw" size={22} color="#F57C00" />
             </View>
-            <Text style={[styles.actionTitle, !currentCheckIn && { color: '#999' }]}>Payments</Text>
-            {!currentCheckIn && <Ionicons name="lock-closed" size={14} color="#CCC" style={styles.lockIcon} />}
+            <View style={styles.menuTextContainer}>
+              <Text style={styles.menuCardTitle}>Return Orders</Text>
+              <Text style={styles.menuCardSubtitle}>View return orders</Text>
+            </View>
+            <Feather name="chevron-right" size={18} color="#CCC" />
           </TouchableOpacity>
-        </View>
 
-        <View style={[styles.actionsGrid, { marginTop: 15 }]}>
-          {/* Customer Orders Card */}
-          <TouchableOpacity
-            style={styles.actionCard}
-            activeOpacity={0.7}
+          {/* Customer Orders */}
+          <TouchableOpacity 
+            style={styles.menuCard}
             onPress={() => router.push('/customer_orders')}
           >
-            <View style={[styles.actionIcon, { backgroundColor: '#E8F5E9' }]}>
-              <Ionicons name="people" size={28} color="#4CAF50" />
+            <View style={[styles.menuIconContainer, { backgroundColor: '#F3E5F5' }]}>
+              <Feather name="users" size={22} color="#7B1FA2" />
             </View>
-            <Text style={styles.actionTitle}>Customer Orders</Text>
+            <View style={styles.menuTextContainer}>
+              <Text style={styles.menuCardTitle}>Customer Orders</Text>
+              <Text style={styles.menuCardSubtitle}>View customer orders</Text>
+            </View>
+            <Feather name="chevron-right" size={18} color="#CCC" />
           </TouchableOpacity>
 
-          {/* My Payments Card */}
-          <TouchableOpacity
-            style={styles.actionCard}
-            activeOpacity={0.7}
-            onPress={() => router.push('/my_payments')}
+          {/* Payments */}
+          <TouchableOpacity 
+            style={styles.menuCard}
+            onPress={() => router.push('/payments')}
           >
-            <View style={[styles.actionIcon, { backgroundColor: '#FFF9C4' }]}>
-              <Ionicons name="receipt-outline" size={28} color="#FBC02D" />
+            <View style={[styles.menuIconContainer, { backgroundColor: '#E1F5FE' }]}>
+              <Feather name="credit-card" size={22} color="#0288D1" />
             </View>
-            <Text style={styles.actionTitle}>My Payments</Text>
+            <View style={styles.menuTextContainer}>
+              <Text style={styles.menuCardTitle}>Payments</Text>
+              <Text style={styles.menuCardSubtitle}>Collect payments</Text>
+            </View>
+            <Feather name="chevron-right" size={18} color="#CCC" />
           </TouchableOpacity>
-        </View>
 
-        <View style={[styles.actionsGrid, { marginTop: 15, marginBottom: 30 }]}>
-          {/* Metrics Card */}
-          <TouchableOpacity
-            style={styles.actionCard}
-            activeOpacity={0.7}
+          {/* Metrics */}
+          <TouchableOpacity 
+            style={styles.menuCard}
             onPress={() => router.push('/metrics')}
           >
-            <View style={[styles.actionIcon, { backgroundColor: '#FCE4EC' }]}>
-              <Ionicons name="bar-chart" size={28} color="#E91E63" />
+            <View style={[styles.menuIconContainer, { backgroundColor: '#FCE4EC' }]}>
+              <Feather name="bar-chart-2" size={22} color="#C2185B" />
             </View>
-            <Text style={styles.actionTitle}>Metrics</Text>
+            <View style={styles.menuTextContainer}>
+              <Text style={styles.menuCardTitle}>Metrics</Text>
+              <Text style={styles.menuCardSubtitle}>Track performance</Text>
+            </View>
+            <Feather name="chevron-right" size={18} color="#CCC" />
           </TouchableOpacity>
-
-          {/* Spacer for alignment */}
-          <View style={[styles.actionCard, { backgroundColor: 'transparent', elevation: 0, shadowOpacity: 0 }]} />
         </View>
+
+        {/* Today's Overview */}
+        <View style={styles.overviewHeader}>
+          <Text style={styles.sectionTitle}>Today's Overview</Text>
+          <TouchableOpacity onPress={() => router.push('/metrics')}>
+            <View style={styles.viewDetailsBtn}>
+              <Text style={styles.viewDetailsText}>View Details</Text>
+              <Feather name="chevron-right" size={14} color="#2E7D32" />
+            </View>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.overviewContainer}>
+          {/* Total Sales */}
+          <View style={styles.statCard}>
+            <View style={[styles.statIconBox, { backgroundColor: '#E8F5E9' }]}>
+              <Feather name="shopping-bag" size={16} color="#2E7D32" />
+            </View>
+            <Text style={styles.statValue}>₹ 12,450</Text>
+            <Text style={styles.statLabel}>Total Sales</Text>
+          </View>
+
+          {/* Orders */}
+          <View style={styles.statCard}>
+            <View style={[styles.statIconBox, { backgroundColor: '#E3F2FD' }]}>
+              <Feather name="file-text" size={16} color="#1976D2" />
+            </View>
+            <Text style={styles.statValue}>24</Text>
+            <Text style={styles.statLabel}>Orders</Text>
+          </View>
+
+          {/* Payments */}
+          <View style={styles.statCard}>
+            <View style={[styles.statIconBox, { backgroundColor: '#FFF3E0' }]}>
+              <Feather name="credit-card" size={16} color="#F57C00" />
+            </View>
+            <Text style={styles.statValue}>₹ 8,300</Text>
+            <Text style={styles.statLabel}>Payments</Text>
+          </View>
+
+          {/* Returns */}
+          <View style={styles.statCard}>
+            <View style={[styles.statIconBox, { backgroundColor: '#F3E5F5' }]}>
+              <Feather name="rotate-ccw" size={16} color="#7B1FA2" />
+            </View>
+            <Text style={styles.statValue}>3</Text>
+            <Text style={styles.statLabel}>Returns</Text>
+          </View>
+        </View>
+
+        {/* Bottom Spacer */}
+        <View style={{ height: 30 }} />
       </ScrollView>
 
       {/* Shop Selection Modal */}
@@ -743,7 +805,7 @@ export default function MainScreen() {
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Nearest Shops</Text>
               <TouchableOpacity onPress={() => setIsModalOpen(false)}>
-                <Ionicons name="close" size={24} color="#333" />
+                <Feather name="x" size={24} color="#333" />
               </TouchableOpacity>
             </View>
 
@@ -764,13 +826,13 @@ export default function MainScreen() {
             </View>
 
             {/* Pagination Dots */}
-            <View style={styles.pagination}>
+            <View style={styles.paginationDots}>
               {nearestShops.map((_, i) => (
                 <View
                   key={i}
                   style={[
-                    styles.dot,
-                    activeSlideIndex === i ? styles.activeDot : styles.inactiveDot,
+                    styles.dotItem,
+                    activeSlideIndex === i ? styles.activeDotItem : styles.inactiveDotItem,
                   ]}
                 />
               ))}
@@ -789,7 +851,7 @@ export default function MainScreen() {
         <SafeAreaView style={styles.saleOrderContainer}>
           <View style={styles.saleOrderHeader}>
             <TouchableOpacity onPress={() => setIsSaleOrderModalOpen(false)}>
-              <Ionicons name="close" size={28} color="#333" />
+              <Feather name="x" size={28} color="#333" />
             </TouchableOpacity>
             <View style={styles.saleOrderHeaderTitle}>
               <Text style={styles.saleOrderShopName}>{currentCheckIn?.shopName}</Text>
@@ -800,7 +862,7 @@ export default function MainScreen() {
 
           {loadingPrices ? (
             <View style={styles.centerLoader}>
-              <ActivityIndicator size="large" color="#4CAF50" />
+              <ActivityIndicator size="large" color={COLORS.primary} />
               <Text style={styles.loaderText}>Loading price list...</Text>
             </View>
           ) : (
@@ -811,7 +873,7 @@ export default function MainScreen() {
               contentContainerStyle={styles.orderListContent}
               ListEmptyComponent={
                 <View style={styles.emptyItems}>
-                  <Ionicons name="alert-circle-outline" size={60} color="#CCC" />
+                  <Feather name="info" size={60} color="#CCC" />
                   <Text style={styles.emptyItemsText}>No items found in price list.</Text>
                 </View>
               }
@@ -830,12 +892,12 @@ export default function MainScreen() {
               disabled={calculateTotal() === 0}
             >
               <Text style={styles.saveOrderBtnText}>Review Order</Text>
-              <Ionicons name="chevron-up" size={20} color="#fff" style={{ marginLeft: 8 }} />
+              <Feather name="chevron-up" size={20} color="#fff" style={{ marginLeft: 8 }} />
             </TouchableOpacity>
           </View>
         </SafeAreaView>
 
-        {/* Summary Flyout (Animated View instead of nested Modal) */}
+        {/* Summary Flyout */}
         {isSummaryFlyoutOpen && (
           <View style={styles.flyoutOverlay}>
             <TouchableOpacity 
@@ -853,7 +915,7 @@ export default function MainScreen() {
                   style={styles.flyoutCloseBtn} 
                   onPress={() => setIsSummaryFlyoutOpen(false)}
                 >
-                  <Ionicons name="close" size={24} color="#333" />
+                  <Feather name="x" size={24} color="#333" />
                 </TouchableOpacity>
               </View>
 
@@ -898,7 +960,6 @@ export default function MainScreen() {
 
                 <View style={styles.flyoutDivider} />
 
-                {/* Credit Toggle - Always Visible */}
                 <View style={styles.creditToggleSection}>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.creditLabel}>Apply Shop Credit</Text>
@@ -912,7 +973,7 @@ export default function MainScreen() {
                   </View>
                   <Switch
                     trackColor={{ false: '#DDD', true: '#C8E6C9' }}
-                    thumbColor={useCredit ? '#4CAF50' : '#F4F3F4'}
+                    thumbColor={useCredit ? COLORS.primary : '#F4F3F4'}
                     onValueChange={() => {
                       const avail = shopDetails?.credits || shopDetails?.outstandingBalance || shopDetails?.creditBalance || shopDetails?.availableCredit || shopDetails?.creditLimit || 0;
                       if (avail > 0) {
@@ -929,32 +990,17 @@ export default function MainScreen() {
                 <View style={styles.inputSection}>
                   <Text style={styles.summaryLabelText}>Received Amount (₹)</Text>
                   <TextInput
-                    style={[styles.summaryInput, { color: '#4CAF50' }]}
+                    style={[styles.summaryInput, { color: COLORS.primary }]}
                     keyboardType="numeric"
                     value={receivedAmount}
-                    onChangeText={(val) => {
-                      const numVal = parseFloat(val) || 0;
-                      const subtotal = calculateTotal();
-                      const disc = parseFloat(discount) || 0;
-                      const retAmt = parseFloat(returnAmount) || 0;
-                      const amountToPay = Math.max(0, subtotal - disc - retAmt);
-                      const creditAvail = shopDetails?.credits || shopDetails?.outstandingBalance || shopDetails?.creditBalance || shopDetails?.availableCredit || shopDetails?.creditLimit || 0;
-                      const creditUsed = useCredit ? Math.min(creditAvail, amountToPay) : 0;
-                      const gTotal = Math.max(0, amountToPay - creditUsed);
-                      
-                      if (numVal > gTotal) {
-                        setReceivedAmount(gTotal.toFixed(2));
-                      } else {
-                        setReceivedAmount(val);
-                      }
-                    }}
+                    onChangeText={(val) => setReceivedAmount(val)}
                     placeholder="0"
                   />
                 </View>
 
                 <View style={styles.summaryRow}>
                   <Text style={styles.balanceLabelText}>Balance Due</Text>
-                  <Text style={[styles.balanceValueText, (Math.max(0, (calculateTotal() - (parseFloat(discount) || 0) - (parseFloat(returnAmount) || 0)) - (useCredit ? Math.min(shopDetails?.credits || shopDetails?.outstandingBalance || shopDetails?.creditBalance || shopDetails?.availableCredit || shopDetails?.creditLimit || 0, calculateTotal() - (parseFloat(discount) || 0) - (parseFloat(returnAmount) || 0)) : 0)) - (parseFloat(receivedAmount) || 0)) > 0 ? { color: '#FF5252' } : { color: '#4CAF50' }]}>
+                  <Text style={[styles.balanceValueText, (Math.max(0, (calculateTotal() - (parseFloat(discount) || 0) - (parseFloat(returnAmount) || 0)) - (useCredit ? Math.min(shopDetails?.credits || shopDetails?.outstandingBalance || shopDetails?.creditBalance || shopDetails?.availableCredit || shopDetails?.creditLimit || 0, calculateTotal() - (parseFloat(discount) || 0) - (parseFloat(returnAmount) || 0)) : 0)) - (parseFloat(receivedAmount) || 0)) > 0 ? { color: '#FF5252' } : { color: COLORS.primary }]}>
                     ₹{Math.max(0, (Math.max(0, (calculateTotal() - (parseFloat(discount) || 0) - (parseFloat(returnAmount) || 0)) - (useCredit ? Math.min(shopDetails?.credits || shopDetails?.outstandingBalance || shopDetails?.creditBalance || shopDetails?.availableCredit || shopDetails?.creditLimit || 0, calculateTotal() - (parseFloat(discount) || 0) - (parseFloat(returnAmount) || 0)) : 0))) - (parseFloat(receivedAmount) || 0))}
                   </Text>
                 </View>
@@ -1008,7 +1054,7 @@ export default function MainScreen() {
                     ) : (
                       <>
                         <Text style={styles.confirmSaveBtnText}>Confirm & Save</Text>
-                        <Ionicons name="checkmark-circle" size={18} color="#fff" style={{ marginLeft: 6 }} />
+                        <Feather name="check-circle" size={18} color="#fff" style={{ marginLeft: 6 }} />
                       </>
                     )}
                   </TouchableOpacity>
@@ -1031,7 +1077,7 @@ export default function MainScreen() {
             <View style={styles.pickerHeader}>
               <Text style={styles.pickerTitle}>Select Batch</Text>
               <TouchableOpacity onPress={() => setBatchPickerVisible(false)}>
-                <Ionicons name="close" size={24} color="#333" />
+                <Feather name="x" size={24} color="#333" />
               </TouchableOpacity>
             </View>
             <FlatList
@@ -1047,10 +1093,10 @@ export default function MainScreen() {
                     setBatchPickerVisible(false);
                   }}
                 >
-                  <Ionicons name="cube-outline" size={18} color="#4CAF50" />
+                  <Feather name="layers" size={18} color={COLORS.primary} />
                   <Text style={styles.batchItemText}>{item.batchNumber}</Text>
                   {orderItems.find(oi => oi.itemId === selectedItemForBatch)?.batchNumber === item.batchNumber && (
-                    <Ionicons name="checkmark-circle" size={20} color="#4CAF50" style={{ marginLeft: 'auto' }} />
+                    <Feather name="check-circle" size={20} color={COLORS.primary} style={{ marginLeft: 'auto' }} />
                   )}
                 </TouchableOpacity>
               )}
@@ -1067,141 +1113,258 @@ export default function MainScreen() {
   );
 }
 
+
+const COLORS = {
+  primary: '#1B3C1A',
+  accent: '#DC2626',
+  background: '#F8F9FA',
+  white: '#FFFFFF',
+  text: '#1F2937',
+  subtext: '#6B7280',
+  border: '#E5E7EB',
+};
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F8F9FA',
+    backgroundColor: COLORS.white,
   },
-  header: {
+  topHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingVertical: 20,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
+    paddingTop: 10,
+    paddingBottom: 15,
   },
-  welcomeText: {
-    fontSize: 14,
-    color: '#666',
+  headerLogo: {
+    width: 120,
+    height: 40,
   },
-  userName: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: '#333',
-    textTransform: 'capitalize',
-  },
-  logoutButton: {
-    width: 45,
-    height: 45,
-    borderRadius: 22.5,
-    backgroundColor: '#FFF5F5',
+  notificationBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: '#F9FAFB',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  headerRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  profileButton: {
-    width: 45,
-    height: 45,
-    borderRadius: 22.5,
-    backgroundColor: '#F1F8F1',
+  notificationBadge: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    backgroundColor: COLORS.accent,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 10,
+    borderWidth: 2,
+    borderColor: COLORS.white,
+  },
+  badgeText: {
+    color: COLORS.white,
+    fontSize: 10,
+    fontWeight: 'bold',
   },
   scrollContent: {
-    padding: 20,
+    paddingHorizontal: 20,
+    paddingBottom: 40,
   },
-  bigCard: {
-    width: '100%',
-    borderRadius: 25,
-    marginBottom: 25,
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 10,
-    overflow: 'hidden',
-  },
-  activeCheckInCard: {
-    elevation: 8,
-    shadowColor: '#4CAF50',
-    shadowOpacity: 0.3,
-  },
-  bigCardGradient: {
-    padding: 25,
-  },
-  bigCardContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  bigIconBox: {
-    width: 65,
-    height: 65,
-    borderRadius: 20,
-    backgroundColor: '#E8F5E9',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 20,
-  },
-  bigCardText: {
-    flex: 1,
-  },
-  bigCardTitle: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: '#333',
-    marginBottom: 4,
-  },
-  bigCardDesc: {
-    fontSize: 14,
-    color: '#666',
-    lineHeight: 20,
-  },
-  actionsGrid: {
+  profileSection: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-  },
-  actionCard: {
-    width: (width - 60) / 2,
-    backgroundColor: '#fff',
-    padding: 20,
-    borderRadius: 25,
     alignItems: 'center',
+    marginTop: 10,
+    marginBottom: 20,
+  },
+  profileTextContainer: {
+    flex: 1,
+  },
+  greetingText: {
+    fontSize: 16,
+    color: COLORS.subtext,
+    fontWeight: '500',
+  },
+  userNameText: {
+    fontSize: 26,
+    fontWeight: '800',
+    color: COLORS.text,
+    marginVertical: 4,
+  },
+  locationContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  locationText: {
+    fontSize: 14,
+    color: COLORS.subtext,
+    marginHorizontal: 6,
+    maxWidth: '70%',
+  },
+  profileIllustration: {
+    width: 140,
+    height: 140,
+  },
+  checkInCard: {
+    backgroundColor: COLORS.primary,
+    borderRadius: 24,
+    padding: 20,
+    marginBottom: 30,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    elevation: 8,
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+  },
+  checkInContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  checkInIconContainer: {
+    marginRight: 15,
+  },
+  checkInIconBg: {
+    width: 54,
+    height: 54,
+    borderRadius: 16,
+    backgroundColor: COLORS.white,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  checkInTextContainer: {
+    flex: 1,
+    paddingRight: 10,
+  },
+  checkInTitle: {
+    color: COLORS.white,
+    fontSize: 18,
+    fontWeight: '800',
+    marginBottom: 4,
+  },
+  checkInDesc: {
+    color: 'rgba(255, 255, 255, 0.8)',
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  checkInButton: {
+    backgroundColor: COLORS.white,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  checkInButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  checkInButtonText: {
+    color: COLORS.primary,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  sectionHeader: {
+    marginBottom: 15,
+  },
+  sectionTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: COLORS.text,
+  },
+  menuGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    gap: 15,
+    marginBottom: 30,
+  },
+  menuCard: {
+    width: (width - 55) / 2,
+    backgroundColor: COLORS.white,
+    borderRadius: 20,
+    padding: 15,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#F3F4F6',
     elevation: 2,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
-    shadowRadius: 5,
-    position: 'relative',
+    shadowRadius: 6,
   },
-  disabledCard: {
-    backgroundColor: '#F5F5F5',
-    elevation: 0,
-    shadowOpacity: 0,
-  },
-  actionIcon: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
+  menuIconContainer: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 12,
+    marginRight: 12,
   },
-  actionTitle: {
-    fontSize: 15,
+  menuTextContainer: {
+    flex: 1,
+  },
+  menuCardTitle: {
+    fontSize: 14,
     fontWeight: '700',
-    color: '#333',
-    textAlign: 'center',
+    color: COLORS.text,
   },
-  lockIcon: {
-    position: 'absolute',
-    top: 15,
-    right: 15,
+  menuCardSubtitle: {
+    fontSize: 10,
+    color: COLORS.subtext,
+    marginTop: 2,
+  },
+  overviewHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 15,
+  },
+  viewDetailsBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  viewDetailsText: {
+    fontSize: 14,
+    color: '#2E7D32',
+    fontWeight: '600',
+  },
+  overviewContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    backgroundColor: '#F9FAFB',
+    borderRadius: 24,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: '#F3F4F6',
+  },
+  statCard: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  statIconBox: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  statValue: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: COLORS.text,
+  },
+  statLabel: {
+    fontSize: 11,
+    color: COLORS.subtext,
+    marginTop: 2,
   },
   modalOverlay: {
     flex: 1,
@@ -1209,7 +1372,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   modalContent: {
-    backgroundColor: '#fff',
+    backgroundColor: COLORS.white,
     borderTopLeftRadius: 30,
     borderTopRightRadius: 30,
     paddingBottom: 40,
@@ -1221,12 +1384,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 25,
     borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
+    borderBottomColor: '#F3F4F6',
   },
   modalTitle: {
     fontSize: 20,
     fontWeight: '800',
-    color: '#333',
+    color: COLORS.text,
   },
   sliderContainer: {
     height: 320,
@@ -1238,12 +1401,12 @@ const styles = StyleSheet.create({
   },
   shopCard: {
     width: '100%',
-    backgroundColor: '#F9F9F9',
-    borderRadius: 25,
+    backgroundColor: '#F9FAFB',
+    borderRadius: 24,
     padding: 20,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#EEE',
+    borderColor: '#E5E7EB',
   },
   shopIconBox: {
     width: 80,
@@ -1257,13 +1420,13 @@ const styles = StyleSheet.create({
   shopNameText: {
     fontSize: 22,
     fontWeight: '800',
-    color: '#333',
+    color: COLORS.text,
     marginBottom: 8,
     textAlign: 'center',
   },
   shopAddressText: {
     fontSize: 14,
-    color: '#666',
+    color: COLORS.subtext,
     textAlign: 'center',
     marginBottom: 15,
     lineHeight: 20,
@@ -1271,7 +1434,7 @@ const styles = StyleSheet.create({
   distanceBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#EEE',
+    backgroundColor: COLORS.white,
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 15,
@@ -1280,44 +1443,43 @@ const styles = StyleSheet.create({
   distanceText: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#666',
+    color: COLORS.subtext,
     marginLeft: 4,
   },
   confirmCheckInButton: {
-    backgroundColor: '#4CAF50',
+    backgroundColor: COLORS.primary,
     width: '100%',
     paddingVertical: 15,
-    borderRadius: 15,
+    borderRadius: 16,
     alignItems: 'center',
   },
   confirmButtonText: {
-    color: '#fff',
+    color: COLORS.white,
     fontSize: 16,
     fontWeight: '700',
   },
-  pagination: {
+  paginationDots: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
     marginTop: 10,
   },
-  dot: {
+  dotItem: {
     width: 8,
     height: 8,
     borderRadius: 4,
     marginHorizontal: 4,
   },
-  activeDot: {
-    backgroundColor: '#4CAF50',
+  activeDotItem: {
+    backgroundColor: COLORS.primary,
     width: 20,
   },
-  inactiveDot: {
+  inactiveDotItem: {
     backgroundColor: '#DDD',
   },
-  // Sale Order Styles
   saleOrderContainer: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: COLORS.white,
   },
   saleOrderHeader: {
     flexDirection: 'row',
@@ -1326,7 +1488,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 15,
     borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
+    borderBottomColor: '#F3F4F6',
   },
   saleOrderHeaderTitle: {
     alignItems: 'center',
@@ -1334,25 +1496,35 @@ const styles = StyleSheet.create({
   saleOrderShopName: {
     fontSize: 18,
     fontWeight: '800',
-    color: '#333',
+    color: COLORS.text,
   },
   saleOrderSubtitle: {
     fontSize: 12,
-    color: '#666',
+    color: COLORS.subtext,
     textTransform: 'uppercase',
     letterSpacing: 1,
+  },
+  centerLoader: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loaderText: {
+    marginTop: 10,
+    color: COLORS.subtext,
+    fontSize: 14,
   },
   orderListContent: {
     padding: 20,
     paddingBottom: 100,
   },
   orderItemCard: {
-    backgroundColor: '#fff',
+    backgroundColor: COLORS.white,
     padding: 15,
-    borderRadius: 15,
+    borderRadius: 16,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: '#F0F0F0',
+    borderColor: '#F3F4F6',
     elevation: 2,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
@@ -1364,37 +1536,29 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  itemBatchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 12,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#F5F5F5',
-  },
   orderItemInfo: {
     flex: 1,
   },
   orderItemName: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#333',
+    color: COLORS.text,
     marginBottom: 4,
   },
   orderItemPrice: {
     fontSize: 14,
-    color: '#666',
+    color: COLORS.subtext,
   },
   itemQuantityContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F8F9FA',
-    borderRadius: 10,
+    backgroundColor: '#F9FAFB',
+    borderRadius: 12,
     padding: 4,
     borderWidth: 1,
-    borderColor: '#E9ECEF',
+    borderColor: '#E5E7EB',
   },
-  qtyBtn: {
+  quantityBtn: {
     width: 36,
     height: 36,
     justifyContent: 'center',
@@ -1403,20 +1567,33 @@ const styles = StyleSheet.create({
   quantityText: {
     fontSize: 15,
     fontWeight: '800',
-    color: '#333',
+    color: COLORS.text,
     marginHorizontal: 12,
     minWidth: 20,
     textAlign: 'center',
   },
-  centerLoader: {
-    flex: 1,
-    justifyContent: 'center',
+  itemBatchRow: {
+    flexDirection: 'row',
     alignItems: 'center',
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#F3F4F6',
   },
-  loaderText: {
-    marginTop: 10,
-    color: '#666',
-    fontSize: 14,
+  batchLabel: {
+    fontSize: 12,
+    color: COLORS.subtext,
+    marginRight: 6,
+  },
+  batchValueBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  batchValueText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.primary,
   },
   emptyItems: {
     flex: 1,
@@ -1426,7 +1603,7 @@ const styles = StyleSheet.create({
   },
   emptyItemsText: {
     marginTop: 10,
-    color: '#999',
+    color: COLORS.subtext,
     fontSize: 16,
   },
   summaryBar: {
@@ -1434,14 +1611,14 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: '#fff',
+    backgroundColor: COLORS.white,
     paddingHorizontal: 20,
     paddingVertical: 20,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     borderTopWidth: 1,
-    borderTopColor: '#F0F0F0',
+    borderTopColor: '#F3F4F6',
     elevation: 20,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: -4 },
@@ -1453,19 +1630,19 @@ const styles = StyleSheet.create({
   },
   summaryLabel: {
     fontSize: 12,
-    color: '#666',
+    color: COLORS.subtext,
     textTransform: 'uppercase',
   },
   summaryValue: {
     fontSize: 24,
     fontWeight: '900',
-    color: '#333',
+    color: COLORS.text,
   },
   saveOrderBtn: {
-    backgroundColor: '#4CAF50',
+    backgroundColor: COLORS.primary,
     paddingHorizontal: 25,
     paddingVertical: 15,
-    borderRadius: 15,
+    borderRadius: 16,
     flexDirection: 'row',
     alignItems: 'center',
   },
@@ -1473,57 +1650,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#CCC',
   },
   saveOrderBtnText: {
-    color: '#fff',
+    color: COLORS.white,
     fontSize: 16,
     fontWeight: '700',
   },
-  // Order Summary Card Styles
-  orderSummaryCard: {
-    backgroundColor: '#fff',
-    borderRadius: 20,
-    padding: 20,
-    marginTop: 20,
-    borderWidth: 1,
-    borderColor: '#EEE',
-    borderStyle: 'dashed',
-  },
-  orderSummaryTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: '#333',
-    marginBottom: 15,
-  },
-  orderSummaryRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  orderSummaryLabel: {
-    fontSize: 14,
-    color: '#666',
-  },
-  orderSummaryValue: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#333',
-  },
-  orderSummaryDivider: {
-    height: 1,
-    backgroundColor: '#F0F0F0',
-    marginVertical: 10,
-  },
-  grandTotalLabel: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: '#333',
-  },
-  grandTotalValue: {
-    fontSize: 20,
-    fontWeight: '900',
-    color: '#4CAF50',
-  },
-  // Flyout Styles
   flyoutOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0,0,0,0.5)',
@@ -1534,7 +1664,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   flyoutContent: {
-    backgroundColor: '#fff',
+    backgroundColor: COLORS.white,
     borderTopLeftRadius: 30,
     borderTopRightRadius: 30,
     paddingBottom: 40,
@@ -1550,39 +1680,30 @@ const styles = StyleSheet.create({
   flyoutHeaderMain: {
     alignItems: 'center',
     flex: 1,
-    marginLeft: 40, // Offset for the close button to keep title centered
+    marginLeft: 40,
   },
   flyoutHandle: {
     width: 40,
     height: 5,
-    backgroundColor: '#EEE',
+    backgroundColor: '#E5E7EB',
     borderRadius: 2.5,
     marginBottom: 10,
   },
   flyoutTitle: {
     fontSize: 16,
     fontWeight: '800',
-    color: '#333',
+    color: COLORS.text,
   },
   flyoutCloseBtn: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#F8F9FA',
+    backgroundColor: '#F9FAFB',
     justifyContent: 'center',
     alignItems: 'center',
   },
   flyoutBody: {
     paddingHorizontal: 20,
-  },
-  summaryLabelText: {
-    fontSize: 13,
-    color: '#666',
-  },
-  summaryValueText: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#333',
   },
   summaryRow: {
     flexDirection: 'row',
@@ -1590,258 +1711,176 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 12,
   },
+  summaryLabelText: {
+    fontSize: 14,
+    color: COLORS.subtext,
+  },
+  summaryValueText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.text,
+  },
   inputSection: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 12,
-    backgroundColor: '#fff',
-    padding: 8,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#F0F0F0',
+    backgroundColor: '#F9FAFB',
+    padding: 12,
+    borderRadius: 12,
   },
   summaryInput: {
-    width: 100,
-    height: 36,
-    backgroundColor: '#F8F9FA',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    textAlign: 'right',
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: '700',
-    color: '#333',
+    color: COLORS.text,
+    textAlign: 'right',
+    flex: 1,
+  },
+  grandTotalLabelText: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: COLORS.text,
+  },
+  grandTotalValueText: {
+    fontSize: 22,
+    fontWeight: '900',
+    color: COLORS.primary,
   },
   flyoutDivider: {
     height: 1,
-    backgroundColor: '#F0F0F0',
-    marginVertical: 10,
-  },
-  grandTotalLabelText: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: '#333',
-  },
-  grandTotalValueText: {
-    fontSize: 20,
-    fontWeight: '900',
-    color: '#333',
+    backgroundColor: '#F3F4F6',
+    marginVertical: 15,
   },
   creditToggleSection: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#E8F5E9',
-    padding: 12,
-    borderRadius: 12,
-    marginBottom: 12,
+    marginBottom: 15,
   },
   creditLabel: {
-    fontSize: 13,
+    fontSize: 15,
     fontWeight: '700',
-    color: '#2E7D32',
+    color: COLORS.text,
   },
   creditValue: {
-    fontSize: 11,
-    color: '#4CAF50',
-  },
-  toggleBase: {
-    width: 44,
-    height: 24,
-    borderRadius: 12,
-    padding: 2,
-  },
-  toggleOn: {
-    backgroundColor: '#4CAF50',
-  },
-  toggleOff: {
-    backgroundColor: '#CCC',
-  },
-  toggleThumb: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: '#fff',
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.2,
-    shadowRadius: 2,
-  },
-  thumbOn: {
-    alignSelf: 'flex-end',
-  },
-  thumbOff: {
-    alignSelf: 'flex-start',
+    fontSize: 12,
+    color: COLORS.subtext,
+    marginTop: 2,
   },
   balanceLabelText: {
     fontSize: 16,
-    fontWeight: '800',
-    color: '#333',
+    fontWeight: '700',
+    color: COLORS.text,
   },
   balanceValueText: {
-    fontSize: 20,
-    fontWeight: '900',
+    fontSize: 18,
+    fontWeight: '800',
   },
   paymentMethodSection: {
-    marginTop: 15,
-    marginBottom: 10,
+    marginTop: 20,
   },
   sectionSmallTitle: {
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: '700',
-    color: '#999',
-    marginBottom: 10,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
+    color: COLORS.text,
+    marginBottom: 12,
   },
   methodGrid: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: 10,
   },
   methodBtn: {
-    flex: 1,
-    height: 38,
-    backgroundColor: '#F5F5F5',
+    paddingHorizontal: 15,
+    paddingVertical: 10,
     borderRadius: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginHorizontal: 4,
+    backgroundColor: '#F9FAFB',
     borderWidth: 1,
-    borderColor: '#EEE',
+    borderColor: '#E5E7EB',
   },
   activeMethodBtn: {
-    backgroundColor: '#4CAF50',
-    borderColor: '#4CAF50',
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
   },
   methodBtnText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#666',
-  },
-  activeMethodBtnText: {
-    color: '#fff',
-  },
-  batchSelectorContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginLeft: 15,
-    backgroundColor: '#F0F0F0',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  batchLabel: {
-    fontSize: 11,
-    color: '#666',
-    marginRight: 4,
+    fontSize: 14,
+    color: COLORS.text,
     fontWeight: '600',
   },
-  batchValueBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  batchValueText: {
-    fontSize: 12,
-    color: '#333',
-    fontWeight: '700',
-    marginRight: 2,
-  },
-  confirmSaveBtn: {
-    backgroundColor: '#4CAF50',
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 15,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    elevation: 3,
-  },
-  confirmSaveBtnText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '800',
+  activeMethodBtnText: {
+    color: COLORS.white,
   },
   flyoutFooterActions: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 20,
+    marginTop: 30,
     gap: 12,
   },
   cancelBtn: {
     flex: 1,
-    backgroundColor: '#F5F5F5',
-    paddingVertical: 14,
-    borderRadius: 15,
-    alignItems: 'center',
+    height: 56,
+    borderRadius: 16,
+    backgroundColor: '#F9FAFB',
     justifyContent: 'center',
+    alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#EEE',
+    borderColor: '#E5E7EB',
   },
   cancelBtnText: {
-    color: '#666',
+    color: COLORS.subtext,
     fontSize: 16,
     fontWeight: '700',
   },
-  orderItemCard: { backgroundColor: '#fff', borderRadius: 15, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: '#F0F0F0' },
-  itemMainRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  orderItemInfo: { flex: 1 },
-  orderItemName: { fontSize: 15, fontWeight: '700', color: '#333' },
-  orderItemPrice: { fontSize: 12, color: '#666', marginTop: 2 },
-  itemQuantityContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F8F9FA', borderRadius: 10, padding: 4 },
-  quantityBtn: { width: 30, height: 30, justifyContent: 'center', alignItems: 'center' },
-  quantityText: { fontSize: 14, fontWeight: '800', color: '#333', paddingHorizontal: 10 },
-  itemBatchRow: { flexDirection: 'row', alignItems: 'center', marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#F8F9FA' },
-  batchLabel: { fontSize: 12, color: '#666', marginRight: 4, fontWeight: '600' },
-  batchValueBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#F0F0F0', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
-  batchValueText: { fontSize: 12, color: '#333', fontWeight: '700' },
-  centerLoader: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 40 },
-  loaderText: { marginTop: 10, color: '#666', fontSize: 14 },
-  orderListContent: { padding: 20 },
-  emptyItems: { flex: 1, justifyContent: 'center', alignItems: 'center', marginTop: 60 },
-  emptyItemsText: { marginTop: 10, color: '#999', fontSize: 15 },
-  disabledSaveBtn: { backgroundColor: '#CCC' },
-  // Picker Styles
-  pickerOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.6)',
+  confirmSaveBtn: {
+    flex: 2,
+    height: 56,
+    borderRadius: 16,
+    backgroundColor: COLORS.primary,
+    flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
+    elevation: 4,
+  },
+  confirmSaveBtnText: {
+    color: COLORS.white,
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  pickerOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
     padding: 20,
   },
   pickerContent: {
-    width: '100%',
-    backgroundColor: '#fff',
-    borderRadius: 20,
+    backgroundColor: COLORS.white,
+    borderRadius: 24,
     maxHeight: '60%',
-    padding: 20,
   },
   pickerHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 20,
+    padding: 20,
     borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
-    paddingBottom: 15,
+    borderBottomColor: '#F3F4F6',
   },
   pickerTitle: {
     fontSize: 18,
     fontWeight: '800',
-    color: '#333',
+    color: COLORS.text,
   },
   batchItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 15,
+    padding: 15,
     borderBottomWidth: 1,
-    borderBottomColor: '#F5F5F5',
+    borderBottomColor: '#F9FAFB',
   },
   batchItemText: {
     fontSize: 16,
-    color: '#333',
+    color: COLORS.text,
     marginLeft: 12,
-    fontWeight: '600',
+    fontWeight: '500',
   },
 });
+
