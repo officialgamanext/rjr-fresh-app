@@ -81,7 +81,7 @@ export default function PaymentsScreen() {
         setCurrentCheckIn(checkInData);
 
         // Fetch fresh shop details
-        const shopRef = doc(db, "shops", (checkInData as any).shopId);
+        const shopRef = doc(db, "stores", (checkInData as any).shopId);
         const shopSnap = await getDoc(shopRef);
         if (shopSnap.exists()) {
           setShopDetails({ id: shopSnap.id, ...shopSnap.data() });
@@ -256,7 +256,7 @@ export default function PaymentsScreen() {
 
       // Handle overpayment (Credits)
       if (remainingPayment > 0.01) {
-        const shopRef = doc(db, "shops", currentCheckIn.shopId);
+        const shopRef = doc(db, "stores", currentCheckIn.shopId);
         batch.update(shopRef, {
           credits: increment(remainingPayment),
         });

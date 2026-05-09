@@ -67,7 +67,7 @@ export default function ReturnOrdersScreen() {
     setLoading(true);
     try {
       const username = user.email.split('@')[0].toLowerCase();
-      const empQ = query(collection(db, 'employees'), where('username', '==', username));
+      const empQ = query(collection(db, 'users'), where('username', '==', username));
       const empSnap = await getDocs(empQ);
       let employeeId = user.uid;
       if (!empSnap.empty) employeeId = empSnap.docs[0].id;
@@ -148,7 +148,7 @@ export default function ReturnOrdersScreen() {
           console.log('ReturnOrders: Active check-in found for shop:', lastCheckIn.shopName);
           setActiveCheckInId(lastCheckIn.id);
           
-          const shopRef = doc(db, 'shops', lastCheckIn.shopId);
+          const shopRef = doc(db, 'stores', lastCheckIn.shopId);
           const shopSnap = await getDoc(shopRef);
           
           if (shopSnap.exists()) {
@@ -157,7 +157,7 @@ export default function ReturnOrdersScreen() {
             
             if (locationId) {
               setSelectedLocationId(locationId);
-              const shopsQ = query(collection(db, 'shops'), where('locationId', '==', locationId));
+              const shopsQ = query(collection(db, 'stores'), where('locationId', '==', locationId));
               const shopsSnap = await getDocs(shopsQ);
               setShops(shopsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
             }
@@ -189,7 +189,7 @@ export default function ReturnOrdersScreen() {
     setSelectedShop(null);
     setSelectedOrder(null);
     try {
-      const q = query(collection(db, 'shops'), where('locationId', '==', locId));
+      const q = query(collection(db, 'stores'), where('locationId', '==', locId));
       const snap = await getDocs(q);
       setShops(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     } catch (e) { console.error(e); }
@@ -306,13 +306,13 @@ export default function ReturnOrdersScreen() {
 
       // 3. Update Shop Credits
       const username = user?.email?.split('@')[0].toLowerCase();
-      const empQ = query(collection(db, 'employees'), where('username', '==', username));
+      const empQ = query(collection(db, 'users'), where('username', '==', username));
       const empSnap = await getDocs(empQ);
       let employeeId = user?.uid;
       if (!empSnap.empty) employeeId = empSnap.docs[0].id;
 
       if (creditToAdd > 0) {
-        const shopRef = doc(db, 'shops', selectedShop.id);
+        const shopRef = doc(db, 'stores', selectedShop.id);
         const shopSnap = await getDoc(shopRef);
         const currentCredits = shopSnap.exists() ? (shopSnap.data().credits || 0) : 0;
         batch.update(shopRef, { credits: currentCredits + creditToAdd });

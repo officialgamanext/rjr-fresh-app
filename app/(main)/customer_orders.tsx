@@ -45,7 +45,7 @@ export default function CustomerOrdersScreen() {
     setLoading(true);
     try {
       const username = user.email.split('@')[0].toLowerCase();
-      const empQuery = query(collection(db, 'employees'), where('username', '==', username));
+      const empQuery = query(collection(db, 'users'), where('username', '==', username));
       const empSnap = await getDocs(empQuery);
       
       if (empSnap.empty) {

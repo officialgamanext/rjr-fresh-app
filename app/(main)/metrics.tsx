@@ -41,7 +41,7 @@ export default function MetricsScreen() {
     try {
       // 1. Get Employee
       const username = user.email.split('@')[0].toLowerCase();
-      const empQ = query(collection(db, 'employees'), where('username', '==', username));
+      const empQ = query(collection(db, 'users'), where('username', '==', username));
       const empSnap = await getDocs(empQ);
       let empId = user.uid;
       if (!empSnap.empty) {
@@ -51,7 +51,7 @@ export default function MetricsScreen() {
       }
 
       // 2. Fetch Shops (Global for risk calculation)
-      const shopSnap = await getDocs(collection(db, 'shops'));
+      const shopSnap = await getDocs(collection(db, 'stores'));
       const allShops = shopSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setShops(allShops);
 

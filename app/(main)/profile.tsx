@@ -29,7 +29,7 @@ export default function ProfileScreen() {
         const username = user.email.split('@')[0].toLowerCase();
         console.log(`Fetching profile for username: ${username}`);
         
-        const q = query(collection(db, 'employees'), where('username', '==', username));
+        const q = query(collection(db, 'users'), where('username', '==', username));
         const querySnapshot = await getDocs(q);
         
         if (!querySnapshot.empty) {
@@ -37,7 +37,7 @@ export default function ProfileScreen() {
         } else {
           console.warn('No employee document found for username:', username);
           // Fallback to UID query if username query fails
-          const qUid = query(collection(db, 'employees'), where('uid', '==', user.uid));
+          const qUid = query(collection(db, 'users'), where('uid', '==', user.uid));
           const querySnapshotUid = await getDocs(qUid);
           if (!querySnapshotUid.empty) {
             setEmployeeData(querySnapshotUid.docs[0].data());

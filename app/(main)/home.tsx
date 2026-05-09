@@ -21,7 +21,33 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { Image } from 'react-native';
 import { db } from '../../config/firebase';
-import { collection, getDocs, addDoc, serverTimestamp, query, where, orderBy, setDoc, doc, getDoc, updateDoc, increment, limit, writeBatch } from 'firebase/firestore';
+import { 
+  collection, 
+  query, 
+  where, 
+  getDocs, 
+  addDoc, 
+  serverTimestamp, 
+  writeBatch, 
+  doc,
+  updateDoc,
+  increment,
+  getDoc,
+  setDoc,
+  orderBy,
+  limit,
+} from 'firebase/firestore';
+
+const COLLECTIONS = {
+  USERS: 'users',
+  STORES: 'stores',
+  CHECKINS: 'checkins',
+  ORDERS: 'orders',
+  RETURNS: 'returns',
+  PAYMENTS: 'payments',
+  ITEMS: 'items',
+  BATCHES: 'batches',
+};
 import * as Location from 'expo-location';
 
 const { width } = Dimensions.get('window');
@@ -83,7 +109,7 @@ export default function MainScreen() {
         const username = user.email.split('@')[0].toLowerCase();
         console.log(`Home: Fetching employee details for username: ${username}`);
         
-        const q = query(collection(db, 'employees'), where('username', '==', username));
+        const q = query(collection(db, COLLECTIONS.USERS), where('username', '==', username));
         const snap = await getDocs(q);
         
         if (!snap.empty) {
@@ -91,12 +117,19 @@ export default function MainScreen() {
           setEmployee({ ...docSnap.data(), id: docSnap.id });
         } else {
           console.warn('Home: No employee document found for username:', username);
-          // Fallback to UID
-          const qUid = query(collection(db, 'employees'), where('uid', '==', user.uid));
+          // Fallback to UID or authUid
+          const qUid = query(collection(db, COLLECTIONS.USERS), where('uid', '==', user.uid));
           const snapUid = await getDocs(qUid);
           if (!snapUid.empty) {
             const docSnapUid = snapUid.docs[0];
             setEmployee({ ...docSnapUid.data(), id: docSnapUid.id });
+          } else {
+            const qAuthUid = query(collection(db, COLLECTIONS.USERS), where('authUid', '==', user.uid));
+            const snapAuthUid = await getDocs(qAuthUid);
+            if (!snapAuthUid.empty) {
+              const docSnapAuthUid = snapAuthUid.docs[0];
+              setEmployee({ ...docSnapAuthUid.data(), id: docSnapAuthUid.id });
+            }
           }
         }
       } catch (err) {
@@ -109,7 +142,7 @@ export default function MainScreen() {
 
   const fetchBatches = async () => {
     try {
-      const q = query(collection(db, 'batches'), orderBy('createdAt', 'desc'), limit(15));
+      const q = query(collection(db, COLLECTIONS.BATCHES), orderBy('createdAt', 'desc'), limit(15));
       const snap = await getDocs(q);
       const batchList: any[] = [];
       snap.forEach(doc => batchList.push({ id: doc.id, ...doc.data() }));
@@ -141,6 +174,18 @@ export default function MainScreen() {
   const handleCheckInPress = async () => {
     setCheckingIn(true);
     try {
+      // Ensure employee details are available for location filtering
+      let currentEmployee = employee;
+      if (!currentEmployee && user?.email) {
+        const username = user.email.split('@')[0].toLowerCase();
+        const qEmp = query(collection(db, COLLECTIONS.USERS), where('username', '==', username));
+        const empSnap = await getDocs(qEmp);
+        if (!empSnap.empty) {
+          currentEmployee = { ...empSnap.docs[0].data(), id: empSnap.docs[0].id };
+          setEmployee(currentEmployee);
+        }
+      }
+
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
         Alert.alert('Permission Denied', 'Location access is required for Check-In.');
@@ -156,21 +201,34 @@ export default function MainScreen() {
       console.log(`Current User Location: Lat ${latitude}, Lon ${longitude}`);
 
       setLoadingShops(true);
-      const shopsSnap = await getDocs(collection(db, 'shops'));
+      
+      // Filter stores by employee's assigned locationId
+      let shopsQuery;
+      if (currentEmployee?.locationId) {
+        console.log(`Home: Filtering stores for location: ${currentEmployee.locationName || currentEmployee.locationId}`);
+        shopsQuery = query(collection(db, COLLECTIONS.STORES), where('locationId', '==', currentEmployee.locationId));
+      } else {
+        shopsQuery = collection(db, COLLECTIONS.STORES);
+      }
+
+      const shopsSnap = await getDocs(shopsQuery);
       const allShops: any[] = [];
       
-      console.log(`Total shops found in DB: ${shopsSnap.size}`);
+      console.log(`Total shops found for location: ${shopsSnap.size}`);
 
       shopsSnap.forEach((doc) => {
         const data = doc.data();
-        if (data.latitude && data.longitude) {
-          const shopLat = parseFloat(data.latitude);
-          const shopLon = parseFloat(data.longitude);
+        // Admin Panel uses 'lat' and 'lng'. Mobile app might have used 'latitude' and 'longitude'.
+        const shopLatVal = data.lat || data.latitude;
+        const shopLonVal = data.lng || data.longitude;
+
+        if (shopLatVal && shopLonVal) {
+          const shopLat = parseFloat(shopLatVal);
+          const shopLon = parseFloat(shopLonVal);
           
           if (!isNaN(shopLat) && !isNaN(shopLon)) {
             const dist = getDistance(latitude, longitude, shopLat, shopLon);
-            console.log(`Shop: ${data.name}, Lat: ${shopLat}, Lon: ${shopLon}, Distance: ${dist.toFixed(2)}m`);
-            
+            // Only show shops within 100m
             if (dist <= 100) {
               allShops.push({ id: doc.id, ...data, distance: dist });
             }
@@ -206,7 +264,7 @@ export default function MainScreen() {
         const now = new Date();
         const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
         const q = query(
-          collection(db, 'checkins'),
+          collection(db, COLLECTIONS.CHECKINS),
           where('userId', '==', user.uid),
           where('date', '==', today)
         );
@@ -245,13 +303,10 @@ export default function MainScreen() {
     setCheckingIn(true);
     try {
       const now = new Date();
-      let finalEmployee = employee;
-
-      // Double check: if employee is still null, try fetching one last time
-      // Deactivate any existing active check-ins for this user today
       const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      
       const activeQ = query(
-        collection(db, 'checkins'),
+        collection(db, COLLECTIONS.CHECKINS),
         where('userId', '==', user?.uid),
         where('date', '==', today),
         where('status', '==', 'Active')
@@ -261,17 +316,6 @@ export default function MainScreen() {
       activeSnap.docs.forEach(docSnap => {
         batch.update(docSnap.ref, { status: 'Inactive' });
       });
-      await batch.commit();
-
-      if (!finalEmployee && user?.email) {
-        const username = user.email.split('@')[0].toLowerCase();
-        const q = query(collection(db, 'employees'), where('username', '==', username));
-        const snap = await getDocs(q);
-        if (!snap.empty) {
-          finalEmployee = snap.docs[0].data();
-          setEmployee(finalEmployee);
-        }
-      }
 
       const checkInData = {
         shopId: shop.id,
@@ -279,25 +323,50 @@ export default function MainScreen() {
         shopAddress: shop.address || '',
         userId: user?.uid,
         username: user?.email?.split('@')[0] || 'User',
-        employeeId: finalEmployee?.id || user?.uid,
-        employeeName: finalEmployee?.name || 'N/A',
-        employeeMobile: finalEmployee?.mobile || 'N/A',
+        employeeId: employee?.id || user?.uid,
+        employeeName: employee?.name || 'N/A',
+        employeeMobile: employee?.mobile || 'N/A',
         priceListId: shop.priceListId || '',
-        locationId: shop.locationId || '',
+        locationId: shop.locationId || employee?.locationId || '',
+        locationName: shop.locationName || employee?.locationName || '',
         userLatitude: userLocation?.latitude || 0,
         userLongitude: userLocation?.longitude || 0,
-        shopLatitude: shop.latitude || 0,
-        shopLongitude: shop.longitude || 0,
+        shopLatitude: shop.lat || shop.latitude || 0,
+        shopLongitude: shop.lng || shop.longitude || 0,
         distance: shop.distance || 0,
-        date: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`,
+        date: today,
         time: now.toLocaleTimeString(),
         timestamp: serverTimestamp(),
         status: 'Active',
       };
 
-      await addDoc(collection(db, 'checkins'), checkInData);
-      setCurrentCheckIn(checkInData);
+      // 1. Add check-in record
+      const checkinRef = doc(collection(db, COLLECTIONS.CHECKINS));
+      batch.set(checkinRef, checkInData);
+      
+      // 2. Update store (shop) with active check-in info
+      const storeRef = doc(db, COLLECTIONS.STORES, shop.id);
+      batch.update(storeRef, {
+        lastCheckInBy: employee?.name || user?.email?.split('@')[0] || 'Agent',
+        lastCheckInId: employee?.id || user?.uid,
+        lastCheckInTime: serverTimestamp(),
+        isActive: true,
+      });
+      
+      // 3. Update employee (user) with current check-in info
+      const userRef = doc(db, COLLECTIONS.USERS, employee?.id || user?.uid);
+      batch.update(userRef, {
+        currentCheckInId: checkinRef.id,
+        currentShopId: shop.id,
+        currentShopName: shop.name,
+        lastCheckInTime: serverTimestamp(),
+      });
+      
+      await batch.commit();
+      
+      setCurrentCheckIn({ id: checkinRef.id, ...checkInData });
       setIsModalOpen(false);
+      Alert.alert('Success', `Checked in at ${shop.name}`);
     } catch (error) {
       console.error('Save check-in error:', error);
       Alert.alert('Error', 'Failed to save check-in details.');
@@ -344,7 +413,20 @@ export default function MainScreen() {
     try {
       // Fetch Shop Details directly by ID for credit/balance info
       console.log('Home: Fetching fresh shop details for ID:', currentCheckIn.shopId);
-      const shopRef = doc(db, 'shops', currentCheckIn.shopId);
+      const shopRef = doc(db, COLLECTIONS.STORES, currentCheckIn.shopId);
+      await updateDoc(shopRef, {
+        isActive: false,
+        lastCheckOutTime: serverTimestamp()
+      });
+
+      // Update employee record to clear check-in
+      const userRef = doc(db, COLLECTIONS.USERS, employee?.id || user?.uid);
+      await updateDoc(userRef, {
+        currentCheckInId: null,
+        currentShopId: null,
+        currentShopName: null,
+        lastCheckOutTime: serverTimestamp()
+      });
       const shopSnap = await getDoc(shopRef);
       
       if (shopSnap.exists()) {
@@ -463,7 +545,7 @@ export default function MainScreen() {
       // Update shop's credits if credit was applied
       if (useCredit && creditToApply > 0) {
         console.log(`Home: Deducting ₹${creditToApply} from shop credits...`);
-        const shopRef = doc(db, 'shops', currentCheckIn.shopId);
+        const shopRef = doc(db, COLLECTIONS.STORES, currentCheckIn.shopId);
         await updateDoc(shopRef, {
           credits: increment(-creditToApply)
         });
@@ -598,7 +680,7 @@ export default function MainScreen() {
             <TouchableOpacity style={styles.locationContainer}>
               <Feather name="map-pin" size={16} color={COLORS.primary} />
               <Text style={styles.locationText} numberOfLines={1}>
-                {currentCheckIn ? currentCheckIn.shopAddress : 'Hyderabad, Telangana'}
+                {currentCheckIn ? currentCheckIn.shopAddress : (employee?.locationName || 'Hyderabad, Telangana')}
               </Text>
               <Feather name="chevron-down" size={16} color="#666" />
             </TouchableOpacity>
@@ -613,31 +695,43 @@ export default function MainScreen() {
 
         {/* Check-In Card */}
         <TouchableOpacity
-          style={styles.checkInCard}
+          style={[styles.checkInCard, currentCheckIn && styles.checkInCardChecked]}
           onPress={handleCheckInPress}
           disabled={checkingIn}
           activeOpacity={0.9}
         >
           <View style={styles.checkInContent}>
             <View style={styles.checkInIconContainer}>
-              <View style={styles.checkInIconBg}>
-                <Feather name="map-pin" size={24} color={COLORS.primary} />
+              <View style={[styles.checkInIconBg, currentCheckIn && styles.checkInIconBgChecked]}>
+                <Feather 
+                  name={currentCheckIn ? "check-circle" : "map-pin"} 
+                  size={24} 
+                  color={COLORS.primary} 
+                />
               </View>
             </View>
             <View style={styles.checkInTextContainer}>
-              <Text style={styles.checkInTitle}>Check In</Text>
-              <Text style={styles.checkInDesc}>
+              <Text style={[styles.checkInTitle, currentCheckIn && styles.checkInTitleChecked]}>
+                {currentCheckIn ? 'Checked In' : 'Check In'}
+              </Text>
+              <Text style={[styles.checkInDesc, currentCheckIn && styles.checkInDescChecked]}>
                 {currentCheckIn 
-                  ? `You are checked in at ${currentCheckIn.shopName}`
-                  : 'Let us know you\'re starting your day. Stay updated and get new orders'}
+                  ? `You are currently at ${currentCheckIn.shopName}`
+                  : 'Start your day by checking in at the nearest store to receive orders.'}
               </Text>
             </View>
           </View>
           
-          <View style={styles.checkInButton}>
+          <View style={[styles.checkInButton, currentCheckIn && styles.checkInButtonChecked]}>
             <View style={styles.checkInButtonContent}>
-              <Feather name="maximize" size={18} color={COLORS.primary} />
-              <Text style={styles.checkInButtonText}>{currentCheckIn ? 'Checked In' : 'Check In'}</Text>
+              <Feather 
+                name={currentCheckIn ? "navigation" : "maximize"} 
+                size={18} 
+                color={currentCheckIn ? COLORS.primary : COLORS.white} 
+              />
+              <Text style={[styles.checkInButtonText, currentCheckIn && styles.checkInButtonTextChecked]}>
+                {currentCheckIn ? 'Active' : 'Start'}
+              </Text>
             </View>
           </View>
         </TouchableOpacity>
@@ -1208,13 +1302,22 @@ const styles = StyleSheet.create({
     height: 140,
   },
   checkInCard: {
-    backgroundColor: COLORS.primary,
+    backgroundColor: COLORS.white,
     borderRadius: 24,
-    padding: 20,
+    padding: 24,
     marginBottom: 30,
+    borderWidth: 2,
+    borderColor: COLORS.primary,
+    borderStyle: 'dashed',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    elevation: 0,
+    shadowColor: 'transparent',
+  },
+  checkInCardChecked: {
+    backgroundColor: COLORS.primary,
+    borderStyle: 'solid',
     elevation: 8,
     shadowColor: COLORS.primary,
     shadowOffset: { width: 0, height: 6 },
@@ -1232,31 +1335,43 @@ const styles = StyleSheet.create({
   checkInIconBg: {
     width: 54,
     height: 54,
-    borderRadius: 16,
-    backgroundColor: COLORS.white,
+    borderRadius: 18,
+    backgroundColor: '#F3F4F6',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  checkInIconBgChecked: {
+    backgroundColor: COLORS.white,
   },
   checkInTextContainer: {
     flex: 1,
     paddingRight: 10,
   },
   checkInTitle: {
-    color: COLORS.white,
-    fontSize: 18,
-    fontWeight: '800',
+    color: COLORS.text,
+    fontSize: 20,
+    fontWeight: '900',
     marginBottom: 4,
   },
+  checkInTitleChecked: {
+    color: COLORS.white,
+  },
   checkInDesc: {
+    color: COLORS.subtext,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  checkInDescChecked: {
     color: 'rgba(255, 255, 255, 0.8)',
-    fontSize: 12,
-    lineHeight: 16,
   },
   checkInButton: {
+    backgroundColor: COLORS.primary,
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  checkInButtonChecked: {
     backgroundColor: COLORS.white,
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
   },
   checkInButtonContent: {
     flexDirection: 'row',
@@ -1264,9 +1379,12 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   checkInButtonText: {
+    color: COLORS.white,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  checkInButtonTextChecked: {
     color: COLORS.primary,
-    fontSize: 13,
-    fontWeight: '700',
   },
   sectionHeader: {
     marginBottom: 15,
