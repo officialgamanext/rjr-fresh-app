@@ -326,7 +326,6 @@ export default function MainScreen() {
         employeeId: employee?.id || user?.uid,
         employeeName: employee?.name || 'N/A',
         employeeMobile: employee?.mobile || 'N/A',
-        priceListId: shop.priceListId || '',
         locationId: shop.locationId || employee?.locationId || '',
         locationName: shop.locationName || employee?.locationName || '',
         userLatitude: userLocation?.latitude || 0,
@@ -403,48 +402,59 @@ export default function MainScreen() {
   );
 
   const handleSaleOrderPress = async () => {
-    if (!currentCheckIn?.priceListId) {
-      Alert.alert('No Price List', 'This shop does not have an assigned price list.');
+    if (!currentCheckIn?.shopId) {
+      Alert.alert('No Active Check-in', 'Please check-in to a shop first.');
       return;
     }
 
     setLoadingPrices(true);
     setIsSaleOrderModalOpen(true);
     try {
-      // Fetch Shop Details directly by ID for credit/balance info
+      // 1. Fetch fresh shop details for credit info
       console.log('Home: Fetching fresh shop details for ID:', currentCheckIn.shopId);
       const shopRef = doc(db, COLLECTIONS.STORES, currentCheckIn.shopId);
-      await updateDoc(shopRef, {
-        isActive: false,
-        lastCheckOutTime: serverTimestamp()
-      });
-
-      // Update employee record to clear check-in
-      const userRef = doc(db, COLLECTIONS.USERS, employee?.id || user?.uid);
-      await updateDoc(userRef, {
-        currentCheckInId: null,
-        currentShopId: null,
-        currentShopName: null,
-        lastCheckOutTime: serverTimestamp()
-      });
       const shopSnap = await getDoc(shopRef);
       
       if (shopSnap.exists()) {
         const data = shopSnap.data();
-        console.log('Home: Shop data fetched:', data);
         setShopDetails({ id: shopSnap.id, ...data });
-      } else {
-        console.warn('Home: Shop document not found for ID:', currentCheckIn.shopId);
       }
 
-      const q = query(
-        collection(db, `priceLists/${currentCheckIn.priceListId}/items`),
-        orderBy('itemName', 'asc')
-      );
-      const snap = await getDocs(q);
-      const items: any[] = [];
-      snap.forEach((doc) => items.push({ id: doc.id, ...doc.data() }));
-      setPriceListItems(items);
+      // 2. Fetch Items and Shop-specific Prices (Matching Admin Panel logic)
+      // Fetch all global items
+      console.log('Home: Fetching items from:', COLLECTIONS.ITEMS);
+      const itemsSnapshot = await getDocs(collection(db, COLLECTIONS.ITEMS));
+      const itemList: any[] = [];
+      itemsSnapshot.forEach(doc => {
+        const d = doc.data();
+        itemList.push({ id: doc.id, ...d });
+      });
+
+      // Fetch shop-specific prices
+      const pricesSnapshot = await getDocs(collection(db, `${COLLECTIONS.STORES}/${currentCheckIn.shopId}/prices`));
+      const pricesMap: any = {};
+      pricesSnapshot.forEach(doc => {
+        const d = doc.data();
+        pricesMap[doc.id] = parseFloat(d.price || 0);
+      });
+
+      // 3. Merge: Show ALL items, use shop price if available, fallback to global price
+      const finalItems = itemList.map(item => {
+        const shopPrice = pricesMap[item.id] || 0;
+        const globalPrice = typeof item.price === 'number' ? item.price : parseFloat(item.price || 0);
+        
+        console.log(`Merging Item: ${item.name}, GlobalPriceRaw: ${item.price}, GlobalPriceParsed: ${globalPrice}, ShopPrice: ${shopPrice}`);
+        
+        return {
+          id: item.id,
+          itemName: item.name,
+          price: shopPrice > 0 ? shopPrice : globalPrice,
+          itemUnit: item.unit || 'pcs',
+          category: item.category || 'General'
+        };
+      });
+
+      setPriceListItems(finalItems);
       setCart({}); // Reset cart
       setOrderItems([]);
       setDiscount('0');
@@ -452,6 +462,7 @@ export default function MainScreen() {
       setReceivedAmount('0');
       setPaymentMethod('Cash');
       setUseCredit(false);
+      setOrderStatus('Ordered');
     } catch (error) {
       console.error('Error fetching price list:', error);
       Alert.alert('Error', 'Failed to load items.');
@@ -515,68 +526,97 @@ export default function MainScreen() {
       const balance = Math.max(0, grandTotal - received);
 
       const orderData = {
-        locationId: shopDetails?.locationId || '',
+        locationId: shopDetails?.locationId || currentCheckIn.locationId || '',
+        locationName: shopDetails?.locationName || currentCheckIn.locationName || '',
         shopId: currentCheckIn.shopId,
         shopName: currentCheckIn.shopName,
         orderId: customOrderId,
         items: orderItems,
-        totalSubtotal: total,
+        subtotal: total,
         discount: parseFloat(discount) || 0,
         returnAmount: parseFloat(returnAmount) || 0,
-        creditsUsed: creditToApply,
+        useCredit: useCredit,
+        creditUsed: creditToApply,
         grandTotal: grandTotal,
-        paymentReceived: received,
+        netPayable: balance + (parseFloat(receivedAmount) || 0), // (GrandTotal - CreditUsed)
+        paidAmount: received,
         balance: balance,
         paymentStatus: balance <= 0 ? 'Paid' : (received > 0 ? 'Partial' : 'Unpaid'),
         paymentMethod: paymentMethod,
-        assignedTo: employee?.id || user?.uid,
         employeeId: employee?.id || user?.uid,
-        assignedToName: employee?.name || 'N/A',
+        employeeName: employee?.name || 'N/A',
         employeeMobile: employee?.mobile || 'N/A',
+        employeeUsername: user?.email?.split('@')[0] || 'N/A',
         type: 'B2B',
         status: orderStatus,
-        createdAt: now.toISOString(),
-        updatedAt: now.toISOString(),
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
         timestamp: serverTimestamp(),
       };
 
-      await setDoc(doc(db, 'orders', customOrderId), orderData);
+      const batch = writeBatch(db);
+      const globalOrderRef = doc(db, 'orders', customOrderId);
+      const storeOrderRef = doc(db, `stores/${currentCheckIn.shopId}/sales`, customOrderId);
+
+      batch.set(globalOrderRef, orderData);
+      batch.set(storeOrderRef, orderData);
       
       // Update shop's credits if credit was applied
       if (useCredit && creditToApply > 0) {
         console.log(`Home: Deducting ₹${creditToApply} from shop credits...`);
         const shopRef = doc(db, COLLECTIONS.STORES, currentCheckIn.shopId);
-        await updateDoc(shopRef, {
-          credits: increment(-creditToApply)
+        batch.update(shopRef, {
+          creditBalance: increment(-creditToApply)
         });
 
-        // Add to Credit History collection
-        await addDoc(collection(db, 'creditHistory'), {
+        // Add to Credit History collection (Global and Subcollection)
+        const histData = {
           shopId: currentCheckIn.shopId,
+          shopName: currentCheckIn.shopName,
           amount: creditToApply,
-          type: 'used',
+          type: 'Usage',
           description: `Used for Order #${customOrderId}`,
-          createdAt: now.toISOString()
-        });
+          createdAt: serverTimestamp(),
+          employeeId: employee?.id || user?.uid,
+          employeeName: employee?.name || 'N/A',
+          employeeMobile: employee?.mobile || 'N/A',
+          employeeUsername: user?.email?.split('@')[0] || 'N/A',
+          orderId: customOrderId
+        };
+        const globalHistRef = doc(collection(db, 'creditHistory'));
+        const storeHistRef = doc(collection(db, `stores/${currentCheckIn.shopId}/creditHistory`));
+        batch.set(globalHistRef, histData);
+        batch.set(storeHistRef, histData);
       }
 
       // Record Payment in payments collection if payment was received
       if (received > 0) {
         console.log(`Home: Recording payment of ₹${received}...`);
-        await addDoc(collection(db, 'payments'), {
+        const payData = {
           shopId: currentCheckIn.shopId,
           shopName: currentCheckIn.shopName,
           amount: received,
-          paymentMethod: paymentMethod,
+          method: paymentMethod,
+          status: 'Confirmed',
           type: 'Order Payment',
           orderId: customOrderId,
+          items: orderItems,
+          grandTotal: grandTotal,
           employeeId: employee?.id || user?.uid,
           employeeName: employee?.name || 'N/A',
+          employeeMobile: employee?.mobile || 'N/A',
+          employeeUsername: user?.email?.split('@')[0] || 'N/A',
           date: now.toISOString().split('T')[0],
+          createdAt: serverTimestamp(),
           timestamp: serverTimestamp(),
-        });
+        };
+        const globalPayRef = doc(collection(db, 'payments'));
+        const storePayRef = doc(collection(db, `stores/${currentCheckIn.shopId}/payments`));
+        batch.set(globalPayRef, payData);
+        batch.set(storePayRef, payData);
       }
       
+      await batch.commit();
       Alert.alert('Success', `Order #${customOrderId} saved successfully!`);
       setIsSummaryFlyoutOpen(false);
       setIsSaleOrderModalOpen(false);

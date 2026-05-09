@@ -295,21 +295,29 @@ export default function ReturnOrdersScreen() {
       }
 
       // 2. Update Order (Keep Subtotal Fixed)
-      batch.update(doc(db, 'orders', selectedOrder.id), {
+      const orderUpdateData = {
         items: updatedOrderItems,
         returnAmount: newReturnAmount,
         grandTotal: newGrandTotal,
         balance: Math.max(0, newGrandTotal - (selectedOrder.paymentReceived || 0)),
         paymentStatus: newPayStatus,
         updatedAt: new Date().toISOString()
-      });
+      };
+      
+      batch.update(doc(db, 'orders', selectedOrder.id), orderUpdateData);
+      batch.update(doc(db, `stores/${selectedShop.id}/sales`, selectedOrder.id), orderUpdateData);
 
       // 3. Update Shop Credits
       const username = user?.email?.split('@')[0].toLowerCase();
       const empQ = query(collection(db, 'users'), where('username', '==', username));
       const empSnap = await getDocs(empQ);
       let employeeId = user?.uid;
-      if (!empSnap.empty) employeeId = empSnap.docs[0].id;
+      let employeeName = user?.displayName || 'N/A';
+      if (!empSnap.empty) {
+        const empData = empSnap.docs[0].data();
+        employeeId = empSnap.docs[0].id;
+        employeeName = empData.name || employeeName;
+      }
 
       if (creditToAdd > 0) {
         const shopRef = doc(db, 'stores', selectedShop.id);
@@ -317,19 +325,22 @@ export default function ReturnOrdersScreen() {
         const currentCredits = shopSnap.exists() ? (shopSnap.data().credits || 0) : 0;
         batch.update(shopRef, { credits: currentCredits + creditToAdd });
 
-        // Add credit history
-        batch.set(doc(collection(db, 'creditHistory')), {
+        // Add credit history (Global and Subcollection)
+        const creditHistData = {
           shopId: selectedShop.id,
           amount: creditToAdd,
           type: 'return',
           description: `Return for order #${selectedOrder.id.slice(-6).toUpperCase()}`,
           createdAt: new Date().toISOString(),
-          employeeId: employeeId
-        });
+          employeeId: employeeId,
+          employeeName: employeeName
+        };
+        batch.set(doc(collection(db, 'creditHistory')), creditHistData);
+        batch.set(doc(collection(db, `stores/${selectedShop.id}/creditHistory`)), creditHistData);
       }
 
-      // 4. Save Return Record
-      batch.set(doc(collection(db, 'returns')), {
+      // 4. Save Return Record (Global and Subcollection)
+      const returnRecordData = {
         shopId: selectedShop.id,
         shopName: selectedShop.name,
         locationId: selectedShop.locationId,
@@ -339,8 +350,11 @@ export default function ReturnOrdersScreen() {
         creditAdded: creditToAdd,
         createdAt: new Date().toISOString(),
         employeeId: employeeId,
+        employeeName: employeeName,
         checkinId: activeCheckInId
-      });
+      };
+      batch.set(doc(collection(db, 'returns')), returnRecordData);
+      batch.set(doc(collection(db, `stores/${selectedShop.id}/returns`)), returnRecordData);
 
       await batch.commit();
       Alert.alert("Success", `Return processed! ₹${creditToAdd} added to credits.`);

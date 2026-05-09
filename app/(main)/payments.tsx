@@ -100,8 +100,7 @@ export default function PaymentsScreen() {
     if (!currentCheckIn?.shopId) return;
 
     const q = query(
-      collection(db, "orders"),
-      where("shopId", "==", currentCheckIn.shopId),
+      collection(db, `stores/${currentCheckIn.shopId}/sales`),
     );
 
     const unsubscribe = onSnapshot(q, (snap) => {
@@ -110,30 +109,31 @@ export default function PaymentsScreen() {
       let totalPaidSum = 0;
       const initialIds = new Set<string>();
 
-      // Robust check for both shopId and shopID locally if needed,
-      // but Firestore query is already filtered by shopId.
-      // We'll focus on field parsing fallbacks.
       snap.docs.forEach((docSnap) => {
         const d = docSnap.data();
-        const grandTotal = parseFloat(
-          d.grandTotal || d.total || d.totalAmount || 0,
-        );
-        const paid = parseFloat(d.paymentReceived || d.paidAmount || 0);
-        const balanceField =
-          d.balance !== undefined ? parseFloat(d.balance) : null;
+        
+        // Robust status check
+        const pStatus = (d.paymentStatus || '').toLowerCase();
+        const oStatus = (d.status || '').toLowerCase();
+        
+        // Skip cancelled or already paid orders
+        if (oStatus === 'cancelled' || pStatus === 'paid') return;
 
-        const due = balanceField !== null ? balanceField : grandTotal - paid;
+        const grandTotal = parseFloat(d.grandTotal || d.netPayable || 0);
+        const paid = parseFloat(d.paidAmount || d.paymentReceived || 0);
+        const due = parseFloat(d.balance !== undefined ? d.balance : (grandTotal - paid));
 
         totalPaidSum += paid;
         totalDueSum += due;
 
-        if (Math.abs(due) > 0.01) {
+        // Only show if there's a significant balance due
+        if (due >= 1) {
           pending.push({
             id: docSnap.id,
             ...d,
             pendingAmount: due,
             grandTotal,
-            paymentReceived: paid,
+            paidAmount: paid,
           });
           initialIds.add(docSnap.id);
         }
@@ -224,51 +224,68 @@ export default function PaymentsScreen() {
         remainingPayment -= applied;
         distributedAmount += applied;
 
-        const newReceived = (parseFloat(order.paymentReceived) || 0) + applied;
-        const newBalance = Math.max(
-          0,
-          (parseFloat(order.grandTotal) || 0) - newReceived,
-        );
-        const newStatus = newBalance <= 0.01 ? "Paid" : "Partial";
+        const newPaidAmount = (parseFloat(order.paidAmount) || 0) + applied;
+        const target = parseFloat(order.grandTotal || order.netPayable || 0);
+        const newStatus = newPaidAmount >= target ? 'Paid' : 'Partial';
 
-        batch.update(doc(db, "orders", order.id), {
-          paymentReceived: newReceived,
-          balance: newBalance,
+        const updateData = {
+          paidAmount: increment(applied),
           paymentStatus: newStatus,
-          updatedAt: new Date().toISOString(),
-        });
+          updatedAt: serverTimestamp(),
+        };
+
+        batch.update(doc(db, "orders", order.id), updateData);
+        batch.update(doc(db, `stores/${currentCheckIn.shopId}/sales`, order.id), updateData);
       }
 
       // Add payment record
-      const paymentRef = doc(collection(db, "payments"));
-      batch.set(paymentRef, {
+      const payData = {
         shopId: currentCheckIn.shopId,
         shopName: currentCheckIn.shopName,
+        locationId: currentCheckIn.locationId || '',
+        locationName: currentCheckIn.locationName || '',
         amount: pAmount,
         distributedAmount: distributedAmount,
         unallocatedAmount: Math.max(0, remainingPayment),
+        method: "Cash", 
+        status: "Awaiting Confirmation",
+        type: "Bulk",
         employeeId: user?.uid,
         employeeName: currentCheckIn.employeeName || "N/A",
-        date: new Date().toISOString(),
-        createdAt: new Date().toISOString(),
+        employeeMobile: currentCheckIn.employeeMobile || "N/A",
+        employeeUsername: user?.email?.split('@')[0] || "N/A",
+        date: new Date().toISOString().split('T')[0],
+        createdAt: serverTimestamp(),
         timestamp: serverTimestamp(),
-      });
+      };
+
+      const globalPayRef = doc(collection(db, "payments"));
+      const storePayRef = doc(collection(db, `stores/${currentCheckIn.shopId}/payments`));
+      batch.set(globalPayRef, payData);
+      batch.set(storePayRef, payData);
 
       // Handle overpayment (Credits)
       if (remainingPayment > 0.01) {
         const shopRef = doc(db, "stores", currentCheckIn.shopId);
         batch.update(shopRef, {
-          credits: increment(remainingPayment),
+          creditBalance: increment(remainingPayment),
         });
 
-        const creditRef = doc(collection(db, "creditHistory"));
-        batch.set(creditRef, {
+        const creditData = {
           shopId: currentCheckIn.shopId,
           amount: remainingPayment,
-          type: "overpayment",
+          type: "Credit",
           description: `Overpayment from ₹${pAmount} payment collected by app`,
-          createdAt: new Date().toISOString(),
-        });
+          createdAt: serverTimestamp(),
+          employeeId: user?.uid,
+          employeeName: currentCheckIn.employeeName || "N/A",
+          employeeUsername: user?.email?.split('@')[0] || "N/A",
+        };
+
+        const creditRef = doc(collection(db, "creditHistory"));
+        const storeCreditRef = doc(collection(db, `stores/${currentCheckIn.shopId}/creditHistory`));
+        batch.set(creditRef, creditData);
+        batch.set(storeCreditRef, creditData);
       }
 
       await batch.commit();
