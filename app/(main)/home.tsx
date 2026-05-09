@@ -94,7 +94,7 @@ export default function MainScreen() {
   const [discount, setDiscount] = useState('0');
   const [returnAmount, setReturnAmount] = useState('0');
   const [receivedAmount, setReceivedAmount] = useState('0');
-  const [paymentMethod, setPaymentMethod] = useState('Cash');
+   const [paymentMethod, setPaymentMethod] = useState('');
   const [useCredit, setUseCredit] = useState(false);
   const [shopDetails, setShopDetails] = useState<any>(null);
   const [isSummaryFlyoutOpen, setIsSummaryFlyoutOpen] = useState(false);
@@ -525,7 +525,7 @@ export default function MainScreen() {
       setDiscount('0');
       setReturnAmount('0');
       setReceivedAmount('0');
-      setPaymentMethod('Cash');
+      setPaymentMethod('');
       setUseCredit(false);
       setOrderStatus('Ordered');
       setPaymentImage(null);
@@ -599,7 +599,24 @@ export default function MainScreen() {
       return;
     }
 
+    const getPendingBalance = () => {
+      const total = calculateTotal();
+      const disc = parseFloat(discount) || 0;
+      const rets = parseFloat(returnAmount) || 0;
+      const amountToPay = Math.max(0, total - disc - rets);
+      
+      const availCredit = shopDetails?.credits || shopDetails?.outstandingBalance || shopDetails?.creditBalance || shopDetails?.availableCredit || shopDetails?.creditLimit || 0;
+      const creditToApply = useCredit ? Math.min(availCredit, amountToPay) : 0;
+      
+      return Math.max(0, amountToPay - creditToApply);
+    };
+
     setSavingOrder(true);
+    if (!paymentMethod) {
+      Alert.alert('Selection Required', 'Please select a payment method.');
+      setSavingOrder(false);
+      return;
+    }
     try {
       const now = new Date();
       const DD = String(now.getDate()).padStart(2, '0');
@@ -619,6 +636,13 @@ export default function MainScreen() {
       const grandTotal = Math.max(0, amountToPay - creditToApply);
       const received = parseFloat(receivedAmount) || 0;
       const balance = Math.max(0, grandTotal - received);
+
+      // Validation for Cash/UPI amounts
+      if ((paymentMethod === 'Cash' || paymentMethod === 'UPI') && received <= 0) {
+        Alert.alert('Payment Required', `Please enter the amount received via ${paymentMethod}.`);
+        setSavingOrder(false);
+        return;
+      }
 
       let upiImageUrl = '';
       if (paymentMethod === 'UPI' && received > 0) {
@@ -1240,11 +1264,12 @@ export default function MainScreen() {
                 <View style={styles.inputSection}>
                   <Text style={styles.summaryLabelText}>Received Amount (₹)</Text>
                   <TextInput
-                    style={[styles.summaryInput, { color: COLORS.primary }]}
+                    style={[styles.summaryInput, { color: COLORS.primary }, paymentMethod === 'Credit' && { backgroundColor: '#F1F5F9', color: '#94A3B8' }]}
                     keyboardType="numeric"
                     value={receivedAmount}
                     onChangeText={(val) => setReceivedAmount(val)}
                     placeholder="0"
+                    editable={paymentMethod !== 'Credit'}
                   />
                 </View>
 
@@ -1273,11 +1298,26 @@ export default function MainScreen() {
                 <View style={styles.paymentMethodSection}>
                   <Text style={styles.sectionSmallTitle}>Payment Method</Text>
                   <View style={styles.methodGrid}>
-                    {['Cash', 'UPI', 'Card'].map((method) => (
+                    {['Cash', 'UPI', 'Card', 'Credit'].map((method) => (
                       <TouchableOpacity
                         key={method}
                         style={[styles.methodBtn, paymentMethod === method && styles.activeMethodBtn]}
-                        onPress={() => setPaymentMethod(method)}
+                        onPress={() => {
+                          setPaymentMethod(method);
+                          if (method === 'Credit') {
+                            setReceivedAmount('0');
+                          } else {
+                            // Auto-fill full remaining balance for Cash, UPI, Card
+                            const total = calculateTotal();
+                            const disc = parseFloat(discount) || 0;
+                            const rets = parseFloat(returnAmount) || 0;
+                            const amountToPay = Math.max(0, total - disc - rets);
+                            const availCredit = shopDetails?.credits || shopDetails?.outstandingBalance || shopDetails?.creditBalance || shopDetails?.availableCredit || shopDetails?.creditLimit || 0;
+                            const creditToApply = useCredit ? Math.min(availCredit, amountToPay) : 0;
+                            const balance = Math.max(0, amountToPay - creditToApply);
+                            setReceivedAmount(balance.toString());
+                          }
+                        }}
                       >
                         <Text style={[styles.methodBtnText, paymentMethod === method && styles.activeMethodBtnText]}>{method}</Text>
                       </TouchableOpacity>
@@ -1285,28 +1325,40 @@ export default function MainScreen() {
                   </View>
                 </View>
 
-                {paymentMethod === 'UPI' && (parseFloat(receivedAmount) || 0) > 0 && (
+                {paymentMethod === 'UPI' && (
                   <View style={styles.paymentMethodSection}>
-                    <Text style={styles.sectionSmallTitle}>UPI Payment Proof</Text>
+                    <View style={styles.sectionHeaderRow}>
+                      <Text style={styles.sectionSmallTitle}>UPI Payment Proof</Text>
+                      {uploadingImage && <ActivityIndicator size="small" color={COLORS.primary} />}
+                    </View>
                     <View style={styles.imagePickerRow}>
-                      <TouchableOpacity style={styles.pickerBtn} onPress={takePaymentPhoto}>
-                        <Ionicons name="camera" size={20} color={COLORS.primary} />
+                      <TouchableOpacity 
+                        style={[styles.pickerBtn, uploadingImage && styles.disabledBtn]} 
+                        onPress={takePaymentPhoto}
+                        disabled={uploadingImage}
+                      >
+                        <Feather name="camera" size={20} color={COLORS.primary} />
                         <Text style={styles.pickerBtnText}>Take Photo</Text>
                       </TouchableOpacity>
-                      <TouchableOpacity style={styles.pickerBtn} onPress={pickPaymentImage}>
-                        <Ionicons name="image" size={20} color={COLORS.primary} />
+                      <TouchableOpacity 
+                        style={[styles.pickerBtn, uploadingImage && styles.disabledBtn]} 
+                        onPress={pickPaymentImage}
+                        disabled={uploadingImage}
+                      >
+                        <Feather name="image" size={20} color={COLORS.primary} />
                         <Text style={styles.pickerBtnText}>Upload</Text>
                       </TouchableOpacity>
                     </View>
                     {paymentImage && (
                       <View style={styles.imagePreviewRow}>
-                        <Ionicons name="checkmark-circle" size={16} color="#4CAF50" />
-                        <Text style={styles.imagePreviewText}>Screenshot Attached</Text>
-                        <TouchableOpacity onPress={() => setPaymentImage(null)}>
+                        <Feather name="check-circle" size={16} color="#4CAF50" />
+                        <Text style={styles.imagePreviewText}>Proof Attached</Text>
+                        <TouchableOpacity onPress={() => setPaymentImage(null)} disabled={uploadingImage}>
                           <Text style={styles.removeText}>Remove</Text>
                         </TouchableOpacity>
                       </View>
                     )}
+                    {uploadingImage && <Text style={styles.uploadingText}>Uploading proof to server...</Text>}
                   </View>
                 )}
 
@@ -2223,6 +2275,22 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#EF4444',
     fontWeight: '700',
+  },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  uploadingText: {
+    fontSize: 12,
+    color: COLORS.subtext,
+    fontStyle: 'italic',
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  disabledBtn: {
+    opacity: 0.5,
   },
 });
 
