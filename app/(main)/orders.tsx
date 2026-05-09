@@ -24,7 +24,7 @@ export default function OrdersScreen() {
   const { user } = useAuth();
   const [orders, setOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeFilter, setActiveFilter] = useState<FilterType>('today');
+  const [activeFilter, setActiveFilter] = useState<FilterType>('all');
   const [selectedOrder, setSelectedOrder] = useState<any>(null);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
 
@@ -37,30 +37,63 @@ export default function OrdersScreen() {
     setLoading(true);
     try {
       const username = user.email.split('@')[0].toLowerCase();
-      const empQ = query(collection(db, 'users'), where('username', '==', username));
-      const empSnap = await getDocs(empQ);
       
+      // Align with home.tsx robust lookup
       let employeeId = user.uid;
-      if (!empSnap.empty) {
-        employeeId = empSnap.docs[0].id;
+      
+      const qUsername = query(collection(db, 'users'), where('username', '==', username));
+      const snapUsername = await getDocs(qUsername);
+      
+      if (!snapUsername.empty) {
+        employeeId = snapUsername.docs[0].id;
+      } else {
+        const qUid = query(collection(db, 'users'), where('uid', '==', user.uid));
+        const snapUid = await getDocs(qUid);
+        if (!snapUid.empty) {
+          employeeId = snapUid.docs[0].id;
+        } else {
+          const qAuthUid = query(collection(db, 'users'), where('authUid', '==', user.uid));
+          const snapAuthUid = await getDocs(qAuthUid);
+          if (!snapAuthUid.empty) {
+            employeeId = snapAuthUid.docs[0].id;
+          }
+        }
       }
 
-      const q = query(
+      console.log(`OrdersScreen: Fetching orders for EmployeeID: ${employeeId} or Username: ${username}`);
+
+      // Query by employeeId (document ID)
+      const qId = query(
         collection(db, 'orders'),
         where('employeeId', '==', employeeId)
       );
 
-      const snap = await getDocs(q);
-      const allOrders: any[] = [];
-      snap.forEach((doc) => allOrders.push({ id: doc.id, ...doc.data() }));
+      // Query by employeeUsername
+      const qUser = query(
+        collection(db, 'orders'),
+        where('employeeUsername', '==', username)
+      );
+
+      const [snapId, snapUser] = await Promise.all([
+        getDocs(qId),
+        getDocs(qUser)
+      ]);
+
+      const ordersMap = new Map<string, any>();
+      snapId.forEach((doc) => ordersMap.set(doc.id, { id: doc.id, ...doc.data() }));
+      snapUser.forEach((doc) => ordersMap.set(doc.id, { id: doc.id, ...doc.data() }));
+
+      const allOrders = Array.from(ordersMap.values());
+      console.log(`OrdersScreen: Total raw orders found: ${allOrders.length}`);
 
       allOrders.sort((a, b) => {
-        const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-        const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        const dateA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : new Date(a.createdAt || 0).getTime();
+        const dateB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : new Date(b.createdAt || 0).getTime();
         return dateB - dateA;
       });
 
       const filtered = filterOrders(allOrders, activeFilter);
+      console.log(`OrdersScreen: Filtered orders (${activeFilter}): ${filtered.length}`);
       setOrders(filtered);
     } catch (error) {
       console.error('Error fetching my orders:', error);
@@ -76,7 +109,7 @@ export default function OrdersScreen() {
 
     return data.filter((order) => {
       if (!order.createdAt) return false;
-      const orderDate = new Date(order.createdAt);
+      const orderDate = order.createdAt?.toDate ? order.createdAt.toDate() : new Date(order.createdAt);
       orderDate.setHours(0, 0, 0, 0);
 
       switch (filter) {

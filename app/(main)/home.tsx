@@ -101,6 +101,13 @@ export default function MainScreen() {
   const [batchPickerVisible, setBatchPickerVisible] = useState(false);
   const [selectedItemForBatch, setSelectedItemForBatch] = useState<string | null>(null);
 
+  const [overviewStats, setOverviewStats] = useState({
+    totalSales: 0,
+    orderCount: 0,
+    payments: 0,
+    returns: 0
+  });
+
   // Fetch employee details on mount
   useEffect(() => {
     const fetchEmployee = async () => {
@@ -112,25 +119,30 @@ export default function MainScreen() {
         const q = query(collection(db, COLLECTIONS.USERS), where('username', '==', username));
         const snap = await getDocs(q);
         
+        let empData: any = null;
         if (!snap.empty) {
           const docSnap = snap.docs[0];
-          setEmployee({ ...docSnap.data(), id: docSnap.id });
+          empData = { ...docSnap.data(), id: docSnap.id };
         } else {
           console.warn('Home: No employee document found for username:', username);
-          // Fallback to UID or authUid
           const qUid = query(collection(db, COLLECTIONS.USERS), where('uid', '==', user.uid));
           const snapUid = await getDocs(qUid);
           if (!snapUid.empty) {
             const docSnapUid = snapUid.docs[0];
-            setEmployee({ ...docSnapUid.data(), id: docSnapUid.id });
+            empData = { ...docSnapUid.data(), id: docSnapUid.id };
           } else {
             const qAuthUid = query(collection(db, COLLECTIONS.USERS), where('authUid', '==', user.uid));
             const snapAuthUid = await getDocs(qAuthUid);
             if (!snapAuthUid.empty) {
               const docSnapAuthUid = snapAuthUid.docs[0];
-              setEmployee({ ...docSnapAuthUid.data(), id: docSnapAuthUid.id });
+              empData = { ...docSnapAuthUid.data(), id: docSnapAuthUid.id };
             }
           }
+        }
+        
+        if (empData) {
+          setEmployee(empData);
+          fetchTodayStats(empData.id);
         }
       } catch (err) {
         console.error('Home: Error fetching employee details:', err);
@@ -139,6 +151,53 @@ export default function MainScreen() {
     fetchEmployee();
     fetchBatches();
   }, [user]);
+
+  const fetchTodayStats = async (empId: string) => {
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      
+      // Fetch today's orders for this employee
+      const qOrders = query(
+        collection(db, 'orders'),
+        where('employeeId', '==', empId)
+      );
+      const snapOrders = await getDocs(qOrders);
+      
+      let totalSales = 0;
+      let orderCount = 0;
+      snapOrders.forEach(doc => {
+        const d = doc.data();
+        const orderDate = d.createdAt?.toDate ? d.createdAt.toDate().toISOString().split('T')[0] : (typeof d.createdAt === 'string' ? d.createdAt.split('T')[0] : '');
+        if (orderDate === today && d.status !== 'Cancelled') {
+          totalSales += (parseFloat(d.grandTotal || d.netPayable) || 0);
+          orderCount++;
+        }
+      });
+
+      // Fetch today's payments for this employee
+      const qPayments = query(
+        collection(db, 'payments'),
+        where('employeeId', '==', empId)
+      );
+      const snapPayments = await getDocs(qPayments);
+      let totalPayments = 0;
+      snapPayments.forEach(doc => {
+        const d = doc.data();
+        if (d.date === today) {
+          totalPayments += (parseFloat(d.amount) || 0);
+        }
+      });
+
+      setOverviewStats({
+        totalSales,
+        orderCount,
+        payments: totalPayments,
+        returns: 0 // Will implement returns tally if collection exists
+      });
+    } catch (error) {
+      console.error("Home: Error fetching today's stats:", error);
+    }
+  };
 
   const fetchBatches = async () => {
     try {
@@ -891,7 +950,7 @@ export default function MainScreen() {
             <View style={[styles.statIconBox, { backgroundColor: '#E8F5E9' }]}>
               <Feather name="shopping-bag" size={16} color="#2E7D32" />
             </View>
-            <Text style={styles.statValue}>₹ 12,450</Text>
+            <Text style={styles.statValue}>₹ {overviewStats.totalSales.toLocaleString()}</Text>
             <Text style={styles.statLabel}>Total Sales</Text>
           </View>
 
@@ -900,7 +959,7 @@ export default function MainScreen() {
             <View style={[styles.statIconBox, { backgroundColor: '#E3F2FD' }]}>
               <Feather name="file-text" size={16} color="#1976D2" />
             </View>
-            <Text style={styles.statValue}>24</Text>
+            <Text style={styles.statValue}>{overviewStats.orderCount}</Text>
             <Text style={styles.statLabel}>Orders</Text>
           </View>
 
@@ -909,7 +968,7 @@ export default function MainScreen() {
             <View style={[styles.statIconBox, { backgroundColor: '#FFF3E0' }]}>
               <Feather name="credit-card" size={16} color="#F57C00" />
             </View>
-            <Text style={styles.statValue}>₹ 8,300</Text>
+            <Text style={styles.statValue}>₹ {overviewStats.payments.toLocaleString()}</Text>
             <Text style={styles.statLabel}>Payments</Text>
           </View>
 
@@ -918,7 +977,7 @@ export default function MainScreen() {
             <View style={[styles.statIconBox, { backgroundColor: '#F3E5F5' }]}>
               <Feather name="rotate-ccw" size={16} color="#7B1FA2" />
             </View>
-            <Text style={styles.statValue}>3</Text>
+            <Text style={styles.statValue}>{overviewStats.returns}</Text>
             <Text style={styles.statLabel}>Returns</Text>
           </View>
         </View>
