@@ -31,8 +31,19 @@ import {
   serverTimestamp
 } from 'firebase/firestore';
 import { LinearGradient } from 'expo-linear-gradient';
+import SignatureModal from '../../components/SignatureModal';
+import { uploadToImageKit } from '../../utils/imageUpload';
 
-type FilterType = 'today' | 'yesterday' | 'this_week' | 'this_month' | 'all';
+
+const COLORS = {
+  primary: '#1B3C1A',
+  accent: '#DC2626',
+  background: '#F8F9FA',
+  white: '#FFFFFF',
+  text: '#1F2937',
+  subtext: '#6B7280',
+  border: '#E5E7EB',
+};
 
 export default function ReturnOrdersScreen() {
   const router = useRouter();
@@ -58,6 +69,10 @@ export default function ReturnOrdersScreen() {
   const [selectedOrder, setSelectedOrder] = useState<any>(null);
   const [returnItems, setReturnItems] = useState<any>({}); // { itemId: { returnQty: 0, batchNumber: '' } }
   const [activeCheckInId, setActiveCheckInId] = useState<string | null>(null);
+  const [signatureModalVisible, setSignatureModalVisible] = useState(false);
+  const [signatureImage, setSignatureImage] = useState<string | null>(null);
+  const [uploadingSignature, setUploadingSignature] = useState(false);
+
 
   // 1. Fetch Return History
   useEffect(() => {
@@ -229,19 +244,23 @@ export default function ReturnOrdersScreen() {
     setLoadingOrders(true);
     try {
       const q = query(
-        collection(db, 'orders'), 
-        where('shopId', '==', shop.id), 
+        collection(db, `stores/${shop.id}/sales`), 
+        orderBy('createdAt', 'desc'),
         limit(30)
       );
       const snap = await getDocs(q);
-      const allOrders = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      allOrders.sort((a: any, b: any) => {
-        const dateA = a.timestamp?.seconds ? a.timestamp.seconds * 1000 : new Date(a.createdAt || 0).getTime();
-        const dateB = b.timestamp?.seconds ? b.timestamp.seconds * 1000 : new Date(b.createdAt || 0).getTime();
-        return dateB - dateA;
-      });
-      setRecentOrders(allOrders);
-    } catch (e) { console.error(e); } finally { setLoadingOrders(false); }
+      setRecentOrders(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    } catch (e) { 
+      console.error("Error fetching recent orders:", e);
+      // Fallback to global orders if subcollection fetch fails (though subcollection is preferred)
+      try {
+        const qGlobal = query(collection(db, 'orders'), where('shopId', '==', shop.id), limit(30));
+        const snapGlobal = await getDocs(qGlobal);
+        setRecentOrders(snapGlobal.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      } catch (e2) { console.error("Global fallback failed:", e2); }
+    } finally {
+      setLoadingOrders(false);
+    }
   };
 
   const handleOrderSelect = (order: any) => {
@@ -279,8 +298,24 @@ export default function ReturnOrdersScreen() {
     const refund = calculateRefund();
     if (refund <= 0) return Alert.alert("Error", "Select at least one item to return.");
 
+    if (!signatureImage) {
+      return Alert.alert("Signature Required", "Please collect the customer signature before processing the return.");
+    }
+
     setSaving(true);
     try {
+      // Upload signature to ImageKit
+      let signatureUrl = '';
+      try {
+        setUploadingSignature(true);
+        const fileName = `sig_${selectedOrder.id}_${Date.now()}.png`;
+        signatureUrl = await uploadToImageKit(signatureImage, fileName);
+        setUploadingSignature(false);
+      } catch (err: any) {
+        setUploadingSignature(false);
+        setSaving(false);
+        return Alert.alert("Upload Failed", "Failed to upload signature: " + err.message);
+      }
       const username = user?.email?.split('@')[0].toLowerCase() || 'N/A';
       
       // Robust employee lookup
@@ -366,7 +401,9 @@ export default function ReturnOrdersScreen() {
         updatedAt: serverTimestamp()
       };
       
-      batch.update(doc(db, 'orders', selectedOrder.id), orderUpdateData);
+      // Use set with merge for global orders to handle cases where it might not exist yet
+      batch.set(doc(db, 'orders', selectedOrder.id), orderUpdateData, { merge: true });
+      // Keep update for store-specific subcollection as we know it exists there
       batch.update(doc(db, `stores/${selectedShop.id}/sales`, selectedOrder.id), orderUpdateData);
 
       // 3. Update Shop Credits
@@ -406,7 +443,8 @@ export default function ReturnOrdersScreen() {
         employeeName: employeeName,
         employeeMobile: employeeMobile,
         employeeUsername: username,
-        checkinId: activeCheckInId
+        checkinId: activeCheckInId,
+        signature: signatureUrl
       };
       const returnGlobalRef = doc(collection(db, 'returns'));
       const returnStoreRef = doc(collection(db, `stores/${selectedShop.id}/returns`));
@@ -661,11 +699,30 @@ export default function ReturnOrdersScreen() {
                   </View>
                 ))}
 
-                <View style={styles.refundSummary}>
-                  <Text style={styles.refundSumLabel}>Total Refund Value</Text>
-                  <Text style={styles.refundSumValue}>₹{calculateRefund()}</Text>
-                </View>
-                <Text style={styles.hintTextSmall}>Refunds are added to shop credits for paid orders or reduce the balance for unpaid orders.</Text>
+                 <View style={styles.refundSummary}>
+                   <Text style={styles.refundSumLabel}>Total Refund Value</Text>
+                   <Text style={styles.refundSumValue}>₹{calculateRefund()}</Text>
+                 </View>
+
+                 <View style={styles.signatureSection}>
+                    <Text style={styles.sectionLabel}>Customer Signature</Text>
+                    {signatureImage ? (
+                      <View style={styles.signatureSuccessBox}>
+                        <Ionicons name="checkmark-circle" size={24} color="#4CAF50" />
+                        <Text style={styles.signatureSuccessText}>Signature Captured</Text>
+                        <TouchableOpacity onPress={() => setSignatureImage(null)}>
+                          <Text style={styles.retakeText}>Retake</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ) : (
+                      <TouchableOpacity style={styles.captureBtn} onPress={() => setSignatureModalVisible(true)}>
+                        <Ionicons name="pencil" size={20} color={COLORS.primary} />
+                        <Text style={styles.captureBtnText}>Capture Signature</Text>
+                      </TouchableOpacity>
+                    )}
+                 </View>
+
+                 <Text style={styles.hintTextSmall}>Refunds are added to shop credits for paid orders or reduce the balance for unpaid orders.</Text>
               </View>
             )}
           </ScrollView>
@@ -715,6 +772,15 @@ export default function ReturnOrdersScreen() {
           </View>
         </View>
       </Modal>
+
+      <SignatureModal 
+        visible={signatureModalVisible}
+        onClose={() => setSignatureModalVisible(false)}
+        onSave={(img) => {
+          setSignatureImage(img);
+          setSignatureModalVisible(false);
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -835,4 +901,49 @@ const styles = StyleSheet.create({
   detailItemMeta: { fontSize: 11, color: '#999' },
   detailItemSub: { fontSize: 14, fontWeight: '800', color: '#333' },
   linkedText: { fontSize: 10, color: '#2E7D32', fontWeight: '600', opacity: 0.8 },
+  signatureSection: {
+    marginTop: 25,
+    paddingTop: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+  },
+  captureBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 15,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.primary,
+    backgroundColor: '#F0F9FF',
+    gap: 10,
+    marginTop: 10,
+  },
+  captureBtnText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: COLORS.primary,
+  },
+  signatureSuccessBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F0FDF4',
+    padding: 15,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#DCFCE7',
+    gap: 12,
+    marginTop: 10,
+  },
+  signatureSuccessText: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#166534',
+  },
+  retakeText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#EF4444',
+  },
 });

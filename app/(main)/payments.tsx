@@ -28,6 +28,9 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../context/AuthContext";
+import * as ImagePicker from 'expo-image-picker';
+import { uploadToImageKit } from '../../utils/imageUpload';
+
 
 export default function PaymentsScreen() {
   const router = useRouter();
@@ -43,6 +46,10 @@ export default function PaymentsScreen() {
   );
   const [amount, setAmount] = useState("0");
   const [shopTotals, setShopTotals] = useState({ totalPaid: 0, totalDue: 0 });
+  const [paymentMethod, setPaymentMethod] = useState("Cash");
+  const [paymentImage, setPaymentImage] = useState<string | null>(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
+
 
   // 1. Fetch current check-in and shop details
   useEffect(() => {
@@ -200,11 +207,51 @@ export default function PaymentsScreen() {
     setAmount(newAmount.toFixed(2));
   };
 
+  const pickPaymentImage = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      quality: 0.7,
+    });
+    if (!result.canceled) setPaymentImage(result.assets[0].uri);
+  };
+
+  const takePaymentPhoto = async () => {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission Denied', 'Camera access is required.');
+      return;
+    }
+    const result = await ImagePicker.launchCameraAsync({
+      allowsEditing: true,
+      quality: 0.7,
+    });
+    if (!result.canceled) setPaymentImage(result.assets[0].uri);
+  };
+
   const handleSave = async () => {
     const pAmount = parseFloat(amount);
     if (!pAmount || pAmount <= 0) {
       Alert.alert("Invalid Amount", "Please enter a valid payment amount.");
       return;
+    }
+
+    let upiImageUrl = '';
+    if (paymentMethod === 'UPI') {
+      if (!paymentImage) {
+        Alert.alert("Proof Required", "Please upload/capture a UPI payment screenshot.");
+        return;
+      }
+      try {
+        setUploadingImage(true);
+        const fileName = `upi_bulk_${currentCheckIn.shopId}_${Date.now()}.jpg`;
+        upiImageUrl = await uploadToImageKit(paymentImage, fileName);
+        setUploadingImage(false);
+      } catch (err: any) {
+        setUploadingImage(false);
+        setSaving(false);
+        return Alert.alert("Upload Failed", "Failed to upload UPI screenshot: " + err.message);
+      }
     }
 
     setSaving(true);
@@ -234,7 +281,9 @@ export default function PaymentsScreen() {
           updatedAt: serverTimestamp(),
         };
 
-        batch.update(doc(db, "orders", order.id), updateData);
+        // Use set with merge for global orders to handle cases where it might not exist yet (e.g. Admin Panel orders)
+        batch.set(doc(db, "orders", order.id), updateData, { merge: true });
+        // Keep update for store subcollection as we know it exists there
         batch.update(doc(db, `stores/${currentCheckIn.shopId}/sales`, order.id), updateData);
       }
 
@@ -247,7 +296,8 @@ export default function PaymentsScreen() {
         amount: pAmount,
         distributedAmount: distributedAmount,
         unallocatedAmount: Math.max(0, remainingPayment),
-        method: "Cash", 
+        method: paymentMethod, 
+        upiImage: upiImageUrl,
         status: "Awaiting Confirmation",
         type: "Bulk",
         employeeId: user?.uid,
@@ -449,6 +499,47 @@ export default function PaymentsScreen() {
               />
             </View>
           </View>
+
+          {/* Payment Method */}
+          <View style={styles.inputSection}>
+            <Text style={styles.inputLabel}>Payment Method</Text>
+            <View style={styles.methodGrid}>
+              {['Cash', 'UPI'].map((m) => (
+                <TouchableOpacity
+                  key={m}
+                  style={[styles.methodBtn, paymentMethod === m && styles.activeMethodBtn]}
+                  onPress={() => setPaymentMethod(m)}
+                >
+                  <Text style={[styles.methodBtnText, paymentMethod === m && styles.activeMethodBtnText]}>{m}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+
+          {paymentMethod === 'UPI' && (
+            <View style={styles.inputSection}>
+              <Text style={styles.inputLabel}>UPI Screenshot</Text>
+              <View style={styles.imagePickerRow}>
+                <TouchableOpacity style={styles.pickerBtn} onPress={takePaymentPhoto}>
+                  <Ionicons name="camera" size={20} color="#4CAF50" />
+                  <Text style={styles.pickerBtnText}>Photo</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.pickerBtn} onPress={pickPaymentImage}>
+                  <Ionicons name="image" size={20} color="#4CAF50" />
+                  <Text style={styles.pickerBtnText}>Upload</Text>
+                </TouchableOpacity>
+              </View>
+              {paymentImage && (
+                <View style={styles.imagePreviewRow}>
+                  <Ionicons name="checkmark-circle" size={16} color="#4CAF50" />
+                  <Text style={styles.imagePreviewText}>Attached</Text>
+                  <TouchableOpacity onPress={() => setPaymentImage(null)}>
+                    <Text style={styles.removeText}>Remove</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+          )}
 
           {/* Orders List Section */}
           <View style={styles.listSection}>
@@ -722,5 +813,71 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 16,
     fontWeight: "700",
+  },
+  methodGrid: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  methodBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: '#F1F5F9',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  activeMethodBtn: {
+    backgroundColor: '#4CAF50',
+    borderColor: '#4CAF50',
+  },
+  methodBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#64748B',
+  },
+  activeMethodBtnText: {
+    color: '#fff',
+  },
+  imagePickerRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  pickerBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    backgroundColor: '#F8FAFC',
+    gap: 8,
+  },
+  pickerBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#64748B',
+  },
+  imagePreviewRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 10,
+    backgroundColor: '#F0FDF4',
+    padding: 12,
+    borderRadius: 12,
+  },
+  imagePreviewText: {
+    flex: 1,
+    fontSize: 13,
+    color: '#166534',
+    fontWeight: '600',
+  },
+  removeText: {
+    fontSize: 13,
+    color: '#EF4444',
+    fontWeight: '700',
   },
 });

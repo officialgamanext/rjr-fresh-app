@@ -49,6 +49,9 @@ const COLLECTIONS = {
   BATCHES: 'batches',
 };
 import * as Location from 'expo-location';
+import * as ImagePicker from 'expo-image-picker';
+import { uploadToImageKit } from '../../utils/imageUpload';
+
 
 const { width } = Dimensions.get('window');
 
@@ -100,6 +103,9 @@ export default function MainScreen() {
   const [orderItems, setOrderItems] = useState<any[]>([]);
   const [batchPickerVisible, setBatchPickerVisible] = useState(false);
   const [selectedItemForBatch, setSelectedItemForBatch] = useState<string | null>(null);
+  const [paymentImage, setPaymentImage] = useState<string | null>(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
+
 
   const [overviewStats, setOverviewStats] = useState({
     totalSales: 0,
@@ -522,11 +528,41 @@ export default function MainScreen() {
       setPaymentMethod('Cash');
       setUseCredit(false);
       setOrderStatus('Ordered');
+      setPaymentImage(null);
     } catch (error) {
       console.error('Error fetching price list:', error);
       Alert.alert('Error', 'Failed to load items.');
     } finally {
       setLoadingPrices(false);
+    }
+  };
+
+  const pickPaymentImage = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      quality: 0.7,
+    });
+
+    if (!result.canceled) {
+      setPaymentImage(result.assets[0].uri);
+    }
+  };
+
+  const takePaymentPhoto = async () => {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission Denied', 'Camera access is required.');
+      return;
+    }
+
+    const result = await ImagePicker.launchCameraAsync({
+      allowsEditing: true,
+      quality: 0.7,
+    });
+
+    if (!result.canceled) {
+      setPaymentImage(result.assets[0].uri);
     }
   };
 
@@ -584,6 +620,25 @@ export default function MainScreen() {
       const received = parseFloat(receivedAmount) || 0;
       const balance = Math.max(0, grandTotal - received);
 
+      let upiImageUrl = '';
+      if (paymentMethod === 'UPI' && received > 0) {
+        if (!paymentImage) {
+          Alert.alert('Proof Required', 'Please upload/capture a UPI payment screenshot.');
+          setSavingOrder(false);
+          return;
+        }
+        try {
+          setUploadingImage(true);
+          upiImageUrl = await uploadToImageKit(paymentImage, `upi_${customOrderId}.jpg`);
+          setUploadingImage(false);
+        } catch (uploadErr: any) {
+          Alert.alert('Upload Failed', 'Failed to upload UPI screenshot: ' + uploadErr.message);
+          setSavingOrder(false);
+          setUploadingImage(false);
+          return;
+        }
+      }
+
       const orderData = {
         locationId: shopDetails?.locationId || currentCheckIn.locationId || '',
         locationName: shopDetails?.locationName || currentCheckIn.locationName || '',
@@ -608,6 +663,7 @@ export default function MainScreen() {
         employeeUsername: user?.email?.split('@')[0] || 'N/A',
         type: 'B2B',
         status: orderStatus,
+        upiImage: upiImageUrl,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
         timestamp: serverTimestamp(),
@@ -661,6 +717,7 @@ export default function MainScreen() {
           orderId: customOrderId,
           items: orderItems,
           grandTotal: grandTotal,
+          upiImage: upiImageUrl,
           employeeId: employee?.id || user?.uid,
           employeeName: employee?.name || 'N/A',
           employeeMobile: employee?.mobile || 'N/A',
@@ -1227,6 +1284,31 @@ export default function MainScreen() {
                     ))}
                   </View>
                 </View>
+
+                {paymentMethod === 'UPI' && (parseFloat(receivedAmount) || 0) > 0 && (
+                  <View style={styles.paymentMethodSection}>
+                    <Text style={styles.sectionSmallTitle}>UPI Payment Proof</Text>
+                    <View style={styles.imagePickerRow}>
+                      <TouchableOpacity style={styles.pickerBtn} onPress={takePaymentPhoto}>
+                        <Ionicons name="camera" size={20} color={COLORS.primary} />
+                        <Text style={styles.pickerBtnText}>Take Photo</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={styles.pickerBtn} onPress={pickPaymentImage}>
+                        <Ionicons name="image" size={20} color={COLORS.primary} />
+                        <Text style={styles.pickerBtnText}>Upload</Text>
+                      </TouchableOpacity>
+                    </View>
+                    {paymentImage && (
+                      <View style={styles.imagePreviewRow}>
+                        <Ionicons name="checkmark-circle" size={16} color="#4CAF50" />
+                        <Text style={styles.imagePreviewText}>Screenshot Attached</Text>
+                        <TouchableOpacity onPress={() => setPaymentImage(null)}>
+                          <Text style={styles.removeText}>Remove</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                  </View>
+                )}
 
                 <View style={styles.flyoutFooterActions}>
                   <TouchableOpacity
@@ -2099,6 +2181,48 @@ const styles = StyleSheet.create({
     color: COLORS.text,
     marginLeft: 12,
     fontWeight: '500',
+  },
+  imagePickerRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 10,
+  },
+  pickerBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    backgroundColor: '#F8FAFC',
+    gap: 8,
+  },
+  pickerBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#475569',
+  },
+  imagePreviewRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 5,
+    backgroundColor: '#F0FDF4',
+    padding: 10,
+    borderRadius: 10,
+  },
+  imagePreviewText: {
+    flex: 1,
+    fontSize: 13,
+    color: '#166534',
+    fontWeight: '600',
+  },
+  removeText: {
+    fontSize: 13,
+    color: '#EF4444',
+    fontWeight: '700',
   },
 });
 
