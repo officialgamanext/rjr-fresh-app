@@ -26,7 +26,9 @@ import {
   writeBatch, 
   getDoc,
   orderBy,
-  limit
+  limit,
+  increment,
+  serverTimestamp
 } from 'firebase/firestore';
 import { LinearGradient } from 'expo-linear-gradient';
 
@@ -39,7 +41,7 @@ export default function ReturnOrdersScreen() {
   // List State
   const [returns, setReturns] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeFilter, setActiveFilter] = useState<FilterType>('today');
+  const [activeFilter, setActiveFilter] = useState<FilterType>('all');
   const [selectedReturn, setSelectedReturn] = useState<any>(null);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
 
@@ -67,23 +69,48 @@ export default function ReturnOrdersScreen() {
     setLoading(true);
     try {
       const username = user.email.split('@')[0].toLowerCase();
-      const empQ = query(collection(db, 'users'), where('username', '==', username));
-      const empSnap = await getDocs(empQ);
-      let employeeId = user.uid;
-      if (!empSnap.empty) employeeId = empSnap.docs[0].id;
-
-      // Query returns created by this employee
-      // In Admin, returns don't always have employeeId, but we'll try to find them if they do
-      const q = query(
-        collection(db, 'returns'),
-        where('employeeId', '==', employeeId)
-      );
-
-      const snap = await getDocs(q);
-      const all: any[] = [];
-      snap.forEach(doc => all.push({ id: doc.id, ...doc.data() }));
       
-      all.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      // Robust employee lookup
+      let employeeId = user.uid;
+      const qUsername = query(collection(db, 'users'), where('username', '==', username));
+      const snapUsername = await getDocs(qUsername);
+      
+      if (!snapUsername.empty) {
+        employeeId = snapUsername.docs[0].id;
+      } else {
+        const qUid = query(collection(db, 'users'), where('uid', '==', user.uid));
+        const snapUid = await getDocs(qUid);
+        if (!snapUid.empty) {
+          employeeId = snapUid.docs[0].id;
+        } else {
+          const qAuthUid = query(collection(db, 'users'), where('authUid', '==', user.uid));
+          const snapAuthUid = await getDocs(qAuthUid);
+          if (!snapAuthUid.empty) {
+            employeeId = snapAuthUid.docs[0].id;
+          }
+        }
+      }
+
+      console.log(`ReturnOrders: Fetching for EmpID: ${employeeId} or Username: ${username}`);
+
+      // Combined Query (ID and Username)
+      const qId = query(collection(db, 'returns'), where('employeeId', '==', employeeId));
+      const qUser = query(collection(db, 'returns'), where('employeeUsername', '==', username));
+
+      const [snapId, snapUser] = await Promise.all([getDocs(qId), getDocs(qUser)]);
+
+      const returnsMap = new Map<string, any>();
+      snapId.forEach(doc => returnsMap.set(doc.id, { id: doc.id, ...doc.data() }));
+      snapUser.forEach(doc => returnsMap.set(doc.id, { id: doc.id, ...doc.data() }));
+
+      const all = Array.from(returnsMap.values());
+      
+      all.sort((a, b) => {
+        const dateA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : new Date(a.createdAt || 0).getTime();
+        const dateB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : new Date(b.createdAt || 0).getTime();
+        return dateB - dateA;
+      });
+
       setReturns(filterReturns(all, activeFilter));
     } catch (error) {
       console.error("Error fetching returns:", error);
@@ -98,18 +125,19 @@ export default function ReturnOrdersScreen() {
     now.setHours(0,0,0,0);
     return data.filter(r => {
       if (!r.createdAt) return false;
-      const d = new Date(r.createdAt);
-      d.setHours(0,0,0,0);
-      if (filter === 'today') return d.getTime() === now.getTime();
+      const orderDate = r.createdAt?.toDate ? r.createdAt.toDate() : new Date(r.createdAt);
+      orderDate.setHours(0,0,0,0);
+
+      if (filter === 'today') return orderDate.getTime() === now.getTime();
       if (filter === 'yesterday') {
         const y = new Date(now); y.setDate(now.getDate() - 1);
-        return d.getTime() === y.getTime();
+        return orderDate.getTime() === y.getTime();
       }
       if (filter === 'this_week') {
         const sw = new Date(now); sw.setDate(now.getDate() - now.getDay() + (now.getDay() === 0 ? -6 : 1));
-        return d >= sw;
+        return orderDate >= sw;
       }
-      if (filter === 'this_month') return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+      if (filter === 'this_month') return orderDate.getMonth() === now.getMonth() && orderDate.getFullYear() === now.getFullYear();
       return true;
     });
   };
@@ -244,14 +272,44 @@ export default function ReturnOrdersScreen() {
   };
 
   const handleSaveReturn = async () => {
+    if (!selectedOrder || !selectedShop) {
+      Alert.alert("Error", "Please select an order and shop first.");
+      return;
+    }
     const refund = calculateRefund();
     if (refund <= 0) return Alert.alert("Error", "Select at least one item to return.");
 
     setSaving(true);
     try {
+      const username = user?.email?.split('@')[0].toLowerCase() || 'N/A';
+      
+      // Robust employee lookup
+      let employeeId = user?.uid || 'N/A';
+      let employeeName = user?.displayName || 'N/A';
+      let employeeMobile = '';
+      
+      const qUsername = query(collection(db, 'users'), where('username', '==', username));
+      const snapUsername = await getDocs(qUsername);
+      
+      if (!snapUsername.empty) {
+        const empData = snapUsername.docs[0].data();
+        employeeId = snapUsername.docs[0].id;
+        employeeName = empData.name || employeeName;
+        employeeMobile = empData.mobile || empData.phone || '';
+      } else {
+        const qUid = query(collection(db, 'users'), where('uid', '==', user?.uid));
+        const snapUid = await getDocs(qUid);
+        if (!snapUid.empty) {
+          const empData = snapUid.docs[0].data();
+          employeeId = snapUid.docs[0].id;
+          employeeName = empData.name || employeeName;
+          employeeMobile = empData.mobile || empData.phone || '';
+        }
+      }
+
       const batch = writeBatch(db);
       
-      // 1. Prepare returned items list and update order items with returnedQty
+      // 1. Prepare returned items list and update order items by subtracting returned quantity
       const returnedItemsList: any[] = [];
       const updatedOrderItems = selectedOrder.items.map((item: any) => {
         const ret = returnItems[item.itemId];
@@ -264,76 +322,71 @@ export default function ReturnOrdersScreen() {
             batchNumber: ret.batchNumber,
             subtotal: ret.returnQty * ret.price
           });
+          // Subtract quantity to match Admin Panel line 502
           return {
             ...item,
+            quantity: (item.quantity || 0) - ret.returnQty,
             returnedQty: (item.returnedQty || 0) + ret.returnQty
           };
         }
         return item;
-      });
+      }).filter((it: any) => it.quantity > 0); // Consistent with Admin Panel line 505
 
-      const newReturnAmount = (parseFloat(selectedOrder.returnAmount || 0)) + refund;
-      const fixedSubtotal = parseFloat(selectedOrder.totalSubtotal || 0);
+      const newReturnedValue = (parseFloat(selectedOrder.returnedValue || 0)) + refund;
+      const subtotal = parseFloat(selectedOrder.subtotal || selectedOrder.totalSubtotal || 0);
       const discount = parseFloat(selectedOrder.discount || 0);
-      const creditsUsed = parseFloat(selectedOrder.creditsUsed || 0);
+      const creditUsed = parseFloat(selectedOrder.creditUsed || selectedOrder.creditsUsed || 0);
+      const paidAmount = parseFloat(selectedOrder.paidAmount || selectedOrder.paymentReceived || 0);
       
-      const newGrandTotal = Math.max(0, fixedSubtotal - discount - creditsUsed - newReturnAmount);
+      const newGrandTotal = Math.max(0, subtotal - discount - creditUsed - newReturnedValue);
+      const newNetPayable = newGrandTotal; // Consistent with Admin Panel
       
       let creditToAdd = 0;
       let newPayStatus = selectedOrder.paymentStatus;
-      const received = selectedOrder.paymentReceived || 0;
 
       if (selectedOrder.paymentStatus === 'Paid') {
         creditToAdd = refund;
       } else {
-        if (received > newGrandTotal) {
-          creditToAdd = received - newGrandTotal;
+        if (paidAmount > newGrandTotal) {
+          creditToAdd = paidAmount - newGrandTotal;
           newPayStatus = 'Paid';
         } else {
-          newPayStatus = received >= newGrandTotal ? 'Paid' : (received > 0 ? 'Partial' : 'Unpaid');
+          newPayStatus = paidAmount >= newGrandTotal ? 'Paid' : (paidAmount > 0 ? 'Partial' : 'Unpaid');
         }
       }
 
-      // 2. Update Order (Keep Subtotal Fixed)
+      // 2. Update Order (Matching Admin fields)
       const orderUpdateData = {
         items: updatedOrderItems,
-        returnAmount: newReturnAmount,
+        returnedValue: newReturnedValue,
         grandTotal: newGrandTotal,
-        balance: Math.max(0, newGrandTotal - (selectedOrder.paymentReceived || 0)),
+        netPayable: newNetPayable,
+        balance: Math.max(0, newNetPayable - paidAmount),
         paymentStatus: newPayStatus,
-        updatedAt: new Date().toISOString()
+        updatedAt: serverTimestamp()
       };
       
       batch.update(doc(db, 'orders', selectedOrder.id), orderUpdateData);
       batch.update(doc(db, `stores/${selectedShop.id}/sales`, selectedOrder.id), orderUpdateData);
 
       // 3. Update Shop Credits
-      const username = user?.email?.split('@')[0].toLowerCase();
-      const empQ = query(collection(db, 'users'), where('username', '==', username));
-      const empSnap = await getDocs(empQ);
-      let employeeId = user?.uid;
-      let employeeName = user?.displayName || 'N/A';
-      if (!empSnap.empty) {
-        const empData = empSnap.docs[0].data();
-        employeeId = empSnap.docs[0].id;
-        employeeName = empData.name || employeeName;
-      }
-
       if (creditToAdd > 0) {
         const shopRef = doc(db, 'stores', selectedShop.id);
-        const shopSnap = await getDoc(shopRef);
-        const currentCredits = shopSnap.exists() ? (shopSnap.data().credits || 0) : 0;
-        batch.update(shopRef, { credits: currentCredits + creditToAdd });
+        batch.update(shopRef, { creditBalance: increment(creditToAdd) });
 
         // Add credit history (Global and Subcollection)
         const creditHistData = {
           shopId: selectedShop.id,
+          shopName: selectedShop.name,
           amount: creditToAdd,
-          type: 'return',
-          description: `Return for order #${selectedOrder.id.slice(-6).toUpperCase()}`,
-          createdAt: new Date().toISOString(),
+          type: 'Credit',
+          description: `Credit from Return for order #${selectedOrder.id.slice(-6).toUpperCase()}`,
+          createdAt: serverTimestamp(),
           employeeId: employeeId,
-          employeeName: employeeName
+          employeeName: employeeName,
+          employeeMobile: employeeMobile,
+          employeeUsername: username,
+          orderId: selectedOrder.id
         };
         batch.set(doc(collection(db, 'creditHistory')), creditHistData);
         batch.set(doc(collection(db, `stores/${selectedShop.id}/creditHistory`)), creditHistData);
@@ -343,18 +396,22 @@ export default function ReturnOrdersScreen() {
       const returnRecordData = {
         shopId: selectedShop.id,
         shopName: selectedShop.name,
-        locationId: selectedShop.locationId,
+        locationId: selectedShop.locationId || '',
         orderId: selectedOrder.id,
         items: returnedItemsList,
-        totalRefund: refund,
+        totalAmount: refund,
         creditAdded: creditToAdd,
-        createdAt: new Date().toISOString(),
+        createdAt: serverTimestamp(),
         employeeId: employeeId,
         employeeName: employeeName,
+        employeeMobile: employeeMobile,
+        employeeUsername: username,
         checkinId: activeCheckInId
       };
-      batch.set(doc(collection(db, 'returns')), returnRecordData);
-      batch.set(doc(collection(db, `stores/${selectedShop.id}/returns`)), returnRecordData);
+      const returnGlobalRef = doc(collection(db, 'returns'));
+      const returnStoreRef = doc(collection(db, `stores/${selectedShop.id}/returns`));
+      batch.set(returnGlobalRef, returnRecordData);
+      batch.set(returnStoreRef, returnRecordData);
 
       await batch.commit();
       Alert.alert("Success", `Return processed! ₹${creditToAdd} added to credits.`);
@@ -366,27 +423,42 @@ export default function ReturnOrdersScreen() {
     } finally { setSaving(false); }
   };
 
-  const renderReturnItem = ({ item }: { item: any }) => (
-    <TouchableOpacity 
-      style={styles.returnCard}
-      onPress={() => { setSelectedReturn(item); setIsDetailModalOpen(true); }}
-    >
-      <View style={styles.cardHeader}>
-        <View>
-          <Text style={styles.cardShopName}>{item.shopName}</Text>
-          <Text style={styles.cardDate}>{new Date(item.createdAt).toLocaleDateString()}</Text>
+  const renderReturnItem = ({ item }: { item: any }) => {
+    const total = item.totalAmount || item.totalRefund || 0;
+    const date = item.createdAt?.toDate ? item.createdAt.toDate() : new Date(item.createdAt || 0);
+    
+    return (
+      <TouchableOpacity 
+        style={styles.returnCard}
+        onPress={() => { setSelectedReturn(item); setIsDetailModalOpen(true); }}
+      >
+        <View style={styles.cardHeader}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.cardShopName}>{item.shopName || 'Unknown Shop'}</Text>
+            <Text style={styles.cardOrderId}>Order: #{item.orderId?.slice(-6).toUpperCase() || 'N/A'}</Text>
+            <Text style={styles.cardDate}>{date.toLocaleDateString()} {date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
+          </View>
+          <View style={styles.refundBadge}>
+            <Text style={styles.refundLabel}>Credit Added</Text>
+            <Text style={styles.refundValue}>₹{item.creditAdded || 0}</Text>
+          </View>
         </View>
-        <View style={styles.refundBadge}>
-          <Text style={styles.refundLabel}>Refund</Text>
-          <Text style={styles.refundValue}>₹{item.totalRefund}</Text>
+        
+        <View style={styles.cardDivider} />
+        
+        <View style={styles.cardFooter}>
+          <View style={styles.itemSummary}>
+            <Ionicons name="cube-outline" size={16} color="#666" />
+            <Text style={styles.cardItemsCount}>{item.items?.length || 0} Items</Text>
+          </View>
+          <View style={styles.totalSummary}>
+            <Text style={styles.totalLabel}>Total Return: </Text>
+            <Text style={styles.totalValueText}>₹{total}</Text>
+          </View>
         </View>
-      </View>
-      <View style={styles.cardFooter}>
-        <Text style={styles.cardItemsCount}>{item.items?.length || 0} items returned</Text>
-        <Ionicons name="chevron-forward" size={18} color="#4CAF50" />
-      </View>
-    </TouchableOpacity>
-  );
+      </TouchableOpacity>
+    );
+  };
 
   return (
     <SafeAreaView style={styles.container}>
